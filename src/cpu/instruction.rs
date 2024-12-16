@@ -1,6 +1,7 @@
-pub struct Instruction {
+#[derive(Clone)]
+pub(super) struct Instruction {
     pub byte_value: u8,
-    pub operand: u16,
+    pub operand: Operand,
     pub op_code: OpCode,
     pub addressing_mode: AddressingMode,
 }
@@ -9,7 +10,7 @@ impl Instruction {
     pub fn from_byte(byte: u8) -> Self {
         Self {
             byte_value: byte,
-            operand: 0,
+            operand: Operand::default(),
             op_code: OPCODES[byte as usize],
             addressing_mode: ADDRESSING_MODES[byte as usize],
         }
@@ -32,21 +33,29 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = match self.addressing_mode {
             Implied => String::new(),
-            Relative => format!("${:02X}", self.operand),
-            Immediate => format!("#${:02X}", self.operand),
+            Relative => format!("${:02X}", self.operand.raw_value),
+            Immediate => format!("#${:02X}", self.operand.raw_value),
             Accumulator => "A".to_string(),
-            ZeroPage => format!("${:02X}", self.operand),
-            ZeroPageX => format!("${:02X}, X", self.operand),
-            ZeroPageY => format!("${:02X}, Y", self.operand),
-            Absolute => format!("${:04X}", self.operand),
-            AbsoluteX => format!("${:04X}, X", self.operand),
-            AbsoluteY => format!("${:04X}, Y", self.operand),
-            Indirect => format!("(${:04X})", self.operand),
-            IndexedIndirect => format!("(${:02X}, X)", self.operand),
-            IndirectIndexed => format!("(${:02X}), Y", self.operand),
+            ZeroPage => format!("${:02X}", self.operand.raw_value),
+            ZeroPageX => format!("${:02X}, X", self.operand.raw_value),
+            ZeroPageY => format!("${:02X}, Y", self.operand.raw_value),
+            Absolute => format!("${:04X}", self.operand.raw_value),
+            AbsoluteX => format!("${:04X}, X", self.operand.raw_value),
+            AbsoluteY => format!("${:04X}, Y", self.operand.raw_value),
+            Indirect => format!("(${:04X})", self.operand.raw_value),
+            IndexedIndirect => format!("(${:02X}, X)", self.operand.raw_value),
+            IndirectIndexed => format!("(${:02X}), Y", self.operand.raw_value),
         };
         write!(f, "{} {}", self.op_code, addr)
     }
+}
+
+#[derive(Debug, Default, Clone)]
+pub(super) struct Operand {
+    pub raw_value: u16,
+    pub address: u16,
+    pub is_address: bool,
+    pub cycles: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -261,7 +270,7 @@ impl AddressingMode {
         }
     }
 
-    fn cycle_length(&self) -> u8 {
+    pub fn cycle_length(&self) -> u8 {
         match self {
             Implied => 2,
             Relative => 2,
@@ -305,8 +314,8 @@ const OPCODES: [OpCode; 256] = [
     Bcc, Sta, Kil, Axa, Sty, Sta, Stx, Axs, Tya, Sta, Txs, Tas, Shy, Sta, Shx, Axa, // 90
     Ldy, Lda, Ldx, Lax, Ldy, Lda, Ldx, Lax, Tay, Lda, Tax, Atx, Ldy, Lda, Ldx, Lax, // A0
     Bcs, Lda, Kil, Lax, Ldy, Lda, Ldx, Lax, Clv, Lda, Tsx, Las, Ldy, Lda, Ldx, Lax, // B0
-    Cpy, Cmp, Nop, Dcp, Cpy, Cmp, Dec, Dcp, Iny, Cmp, Dex, Axs, Cpy, Cmp, Cmp, Dcp, // C0
-    Bne, Cmp, Kil, Dcp, Nop, Cmp, Dec, Dcp, Cld, Cmp, Nop, Dcp, Nop, Cmp, Cmp, Dcp, // D0
+    Cpy, Cmp, Nop, Dcp, Cpy, Cmp, Dec, Dcp, Iny, Cmp, Dex, Axs, Cpy, Cmp, Dec, Dcp, // C0
+    Bne, Cmp, Kil, Dcp, Nop, Cmp, Dec, Dcp, Cld, Cmp, Nop, Dcp, Nop, Cmp, Dec, Dcp, // D0
     Cpx, Sbc, Nop, Isc, Cpx, Sbc, Inc, Isc, Inx, Sbc, Nop, Sbc, Cpx, Sbc, Inc, Isc, // E0
     Beq, Sbc, Kil, Isc, Nop, Sbc, Inc, Isc, Sed, Sbc, Nop, Isc, Nop, Sbc, Inc, Isc, // F0
 ];
@@ -315,7 +324,7 @@ use AddressingMode::*;
 
 #[rustfmt::skip]
 const ADDRESSING_MODES: [AddressingMode; 256] = [
-//  0          1                2            3                4          5          6          7    
+//  0,8        1,9              2,A          3,B              4,C        5,D        6,E        7,F    
     Implied,   IndexedIndirect, Implied,     IndexedIndirect, ZeroPage,  ZeroPage,  ZeroPage,  ZeroPage,  // 00
     Implied,   Immediate,       Accumulator, Immediate,       Absolute,  Absolute,  Absolute,  Absolute,  // 08
     Relative,  IndirectIndexed, Implied,     IndirectIndexed, ZeroPageX, ZeroPageX, ZeroPageX, ZeroPageX, // 10
