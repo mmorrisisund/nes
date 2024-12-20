@@ -4,6 +4,7 @@ pub(super) struct Instruction {
     pub operand: Operand,
     pub op_code: OpCode,
     pub addressing_mode: AddressingMode,
+    pub(super) is_official: bool,
 }
 
 impl Instruction {
@@ -13,6 +14,7 @@ impl Instruction {
             operand: Operand::default(),
             op_code: OPCODES[byte as usize],
             addressing_mode: ADDRESSING_MODES[byte as usize],
+            is_official: OFFICIAL_STATUS[byte as usize],
         }
     }
 
@@ -33,18 +35,18 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = match self.addressing_mode {
             Implied => String::new(),
-            Relative => format!("${:02X}", self.operand.raw_value),
-            Immediate => format!("#${:02X}", self.operand.raw_value),
+            Relative => format!("${:02X}", self.operand.address),
+            Immediate => format!("#${:02X}", self.operand.address),
             Accumulator => "A".to_string(),
-            ZeroPage => format!("${:02X}", self.operand.raw_value),
-            ZeroPageX => format!("${:02X}, X", self.operand.raw_value),
-            ZeroPageY => format!("${:02X}, Y", self.operand.raw_value),
-            Absolute => format!("${:04X}", self.operand.raw_value),
-            AbsoluteX => format!("${:04X}, X", self.operand.raw_value),
-            AbsoluteY => format!("${:04X}, Y", self.operand.raw_value),
-            Indirect => format!("(${:04X})", self.operand.raw_value),
-            IndexedIndirect => format!("(${:02X}, X)", self.operand.raw_value),
-            IndirectIndexed => format!("(${:02X}), Y", self.operand.raw_value),
+            ZeroPage => format!("${:02X}", self.operand.address),
+            ZeroPageX => format!("${:02X}, X", self.operand.address),
+            ZeroPageY => format!("${:02X}, Y", self.operand.address),
+            Absolute => format!("${:04X}", self.operand.address),
+            AbsoluteX => format!("${:04X}, X", self.operand.address),
+            AbsoluteY => format!("${:04X}, Y", self.operand.address),
+            Indirect => format!("(${:04X})", self.operand.address),
+            IndexedIndirect => format!("(${:02X}, X)", self.operand.address),
+            IndirectIndexed => format!("(${:02X}), Y", self.operand.address),
         };
         write!(f, "{} {}", self.op_code, addr)
     }
@@ -118,28 +120,27 @@ pub enum OpCode {
     Tya, // Transfer y to a
 
     // Unofficial
-    Slo, // Arithmetic shift left, then OR [Asl + Ora]
-    Sre, // Logical shift right, then XOR [Lsr + Eor]
+    Alr, // And #imm, then Lsr A
+    Anc, // And #imm, then set Carry = Negative
+    Arr, // And #imm, then Ror A
+    Axs, // ((A and X) - #imm) -> X
+    Lax, // Load A and X [Lda + Tax]
+    Sax, // Store the value of (A and X)
+
+    Dcp, // Decrement memory, then Compare A [Dec + Cmp]
+    Isc, // Increment memory, then Subtract with carry [Inc + Sbc]
     Rla, // Rotate left, then And [Rol + And]
     Rra, // Rotate right, then Add with carry [Ror + Adc]
-    Isc, // Increment memory, then Subtract with carry [Inc + Sbc]
-    Dcp, // Decrement memory, then Compare A [Dec + Cmp]
-    Sax, // Store the value of (A and X)
-    Lax, // Load A and X [Lda + Tax]
+    Slo, // Arithmetic shift left, then OR [Asl + Ora]
+    Sre, // Logical shift right, then XOR [Lsr + Eor]
 
-    Anc, // And #imm, then set Carry = Negative
-    Alr, // And #imm, then Lsr A
-    Arr, // And #imm, then Ror A
     Atx, // And #imm -> X
-    Axs, // ((A and X) - #imm) -> X
-    Xaa, // Transfer X to A, then And #imm [Txa + And #imm]
-
-    Axa, // Store the value of (A and X and {High byte of $addr}) into $addr
-    Shy, // Store the value of (Y and {High byte of $addr}) into $addr
-    Shx, // Store the value of (X and {High byte of $addr}) into $addr
-
-    Tas, // Store the value of (X and A) into (the stack pointer), and store ((the stack pointer) and {High byte of $addr}) into $addr
     Las, // Store the value of ({value in $addr} & (the stack pointer)) into A, X, and (the stack pointer)
+    Axa, // Store the value of (A and X and {High byte of $addr}) into $addr
+    Shx, // Store the value of (X and {High byte of $addr}) into $addr
+    Shy, // Store the value of (Y and {High byte of $addr}) into $addr
+    Tas, // Store the value of (X and A) into (the stack pointer), and store ((the stack pointer) and {High byte of $addr}) into $addr
+    Xaa, // Transfer X to A, then And #imm [Txa + And #imm]
 
     Kil, // Halt the CPU (CRASH)
 }
@@ -357,4 +358,25 @@ const ADDRESSING_MODES: [AddressingMode; 256] = [
     Implied,   Immediate,       Implied,     Immediate,       Absolute,  Absolute,  Absolute,  Absolute,  // E8
     Relative,  IndirectIndexed, Implied,     IndirectIndexed, ZeroPageX, ZeroPageX, ZeroPageX, ZeroPageX, // F0
     Implied,   AbsoluteY,       Implied,     AbsoluteY,       AbsoluteX, AbsoluteX, AbsoluteX, AbsoluteX, // F8
+];
+
+#[rustfmt::skip]
+const OFFICIAL_STATUS: [bool; 256] = [
+//  0      1     2      3      4      5     6     7      8     9      A      B      C      D     E      F
+    true,  true, false, false, false, true, true, false, true, true,  true,  false, false, true, true,  false, // 00
+    true,  true, false, false, false, true, true, false, true, true,  false, false, false, true, true,  false, // 10
+    true,  true, false, false, true,  true, true, false, true, true,  true,  false, true,  true, true,  false, // 20
+    true,  true, false, false, false, true, true, false, true, true,  false, false, false, true, true,  false, // 30
+    true,  true, false, false, false, true, true, false, true, true,  true,  false, true,  true, true,  false, // 40
+    true,  true, false, false, false, true, true, false, true, true,  false, false, false, true, true,  false, // 50
+    true,  true, false, false, false, true, true, false, true, true,  true,  false, true,  true, true,  false, // 60
+    true,  true, false, false, false, true, true, false, true, true,  false, false, false, true, true,  false, // 70
+    false, true, false, false, true,  true, true, false, true, false, true,  false, true,  true, true,  false, // 80
+    true,  true, false, false, true,  true, true, false, true, true,  true,  false, false, true, false, false, // 90
+    true,  true, true,  false, true,  true, true, false, true, true,  true,  false, true,  true, true,  false, // A0
+    true,  true, false, false, true,  true, true, false, true, true,  true,  false, true,  true, true,  false, // B0
+    true,  true, false, false, true,  true, true, false, true, true,  true,  false, true,  true, true,  false, // C0
+    true,  true, false, false, false, true, true, false, true, true,  false, false, false, true, true,  false, // D0
+    true,  true, false, false, true,  true, true, false, true, true,  true,  false, true,  true, true,  false, // E0
+    true,  true, false, false, false, true, true, false, true, true,  false, false, false, true, true,  false, // F0
 ];
