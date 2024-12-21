@@ -4,13 +4,14 @@ use instruction::{Instruction, OpCode};
 
 use super::common::Bus;
 
-const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
+// const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;
 const IRQ_VECTOR_ADDRESS: u16 = 0xfffe;
 
 const STACK_PAGE: u16 = 0x0100;
 const STACK_START: u8 = 0xfd;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum RunState {
     Waiting,
     NormalExecution,
@@ -41,7 +42,8 @@ pub struct CPU<T: Bus> {
     reg_status: u8,
 
     next_instruction: Option<Instruction>,
-    cycles_left: u64,
+    cycles_left: u8,
+    total_cycles: u64,
 
     bus: T,
 }
@@ -58,6 +60,7 @@ impl<T: Bus> CPU<T> {
 
             next_instruction: None,
             cycles_left: 0,
+            total_cycles: 0,
 
             bus,
         }
@@ -69,21 +72,47 @@ impl<T: Bus> CPU<T> {
         self.reg_y = 0;
         self.reg_pc = self.bus.read_u16(RESET_VECTOR_ADDRESS);
         self.reg_sp = STACK_START;
-
         self.reg_status = StatusFlag::InterruptDisable as u8 | 1 << 5; // unused, but always 1
-        self.cycles_left = 7;
+        self.total_cycles = 7;
 
-        self.next_instruction = Some(self.fetch_next_instruction());
+        self.fetch_next_instruction();
+    }
+
+    pub fn cycle_tick(&mut self) -> RunState {
+        self.total_cycles += 1;
+
+        if self.cycles_left == 0 && self.next_instruction.is_none() {
+            self.fetch_next_instruction();
+            self.cycles_left -= 1;
+
+            RunState::Waiting
+        } else if self.cycles_left == 1 && self.next_instruction.is_some() {
+            // TODO: can't this just be done in execute?
+            let instruction = self.next_instruction.take().unwrap();
+            let state = self.execute_instruction(&instruction);
+            // adjust cycle time
+            self.cycles_left -= 1;
+            // return state from execution
+            state
+        } else {
+            self.cycles_left -= 1;
+            RunState::Waiting
+        }
     }
 
     pub fn run_next_instruction(&mut self) -> RunState {
-        let instruction = self.next_instruction.take().unwrap();
-        let state = self.run_instruction(&instruction);
-        self.next_instruction = Some(self.fetch_next_instruction());
-        state
+        loop {
+            let state = self.cycle_tick();
+            if state != RunState::Waiting {
+                return state;
+            }
+        }
     }
 
-    pub fn trace(&self) -> String {
+    pub fn trace(&mut self) -> String {
+        if self.next_instruction.is_none() {
+            self.fetch_next_instruction();
+        }
         let instruction = self.next_instruction.as_ref().unwrap().clone();
 
         let pc = self.reg_pc - instruction.get_instruction_len() as u16;
@@ -186,7 +215,8 @@ impl<T: Bus> CPU<T> {
         let y = self.reg_y;
         let p = self.reg_status;
         let s = self.reg_sp;
-        let regs = format!("A:{a:02X} X:{x:02X} Y:{y:02X} P:{p:02X} SP:{s:02X}");
+        let c = self.total_cycles;
+        let regs = format!("A:{a:02X} X:{x:02X} Y:{y:02X} P:{p:02X} SP:{s:02X} CYC:{c}");
 
         format!("{asm:47} {regs}")
     }
@@ -218,7 +248,7 @@ impl<T: Bus> CPU<T> {
         self.set_status(StatusFlag::Negative, result & 0x80 != 0);
     }
 
-    fn get_operand_value(&self, instruction: &Instruction) -> u8 {
+    fn get_operand_value(&mut self, instruction: &Instruction) -> u8 {
         if instruction.operand_is_address() {
             self.bus.read(instruction.operand)
         } else {
@@ -247,16 +277,16 @@ impl<T: Bus> CPU<T> {
 
     // returns (cycle adjustment, run state)
     fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> (u8, RunState) {
-        let mut cycles = 0;
+        // TODO: Remove cycles and return value
+        let cycles = 0;
         let instruction_start = self.reg_pc.wrapping_sub(2);
 
         if condition {
-            cycles = if on_same_page(self.reg_pc, new_addr) {
-                1
-            } else {
-                2
-            };
+            if !on_same_page(self.reg_pc, new_addr) {
+                self.total_cycles += 1;
+            }
             self.reg_pc = new_addr;
+            self.total_cycles += 1;
         }
 
         (
@@ -285,7 +315,7 @@ impl<T: Bus> CPU<T> {
         self.bus.read(STACK_PAGE | self.reg_sp as u16)
     }
 
-    fn fetch_next_instruction(&mut self) -> Instruction {
+    fn fetch_next_instruction(&mut self) {
         let opcode = self.bus.read(self.reg_pc);
 
         self.reg_pc += 1;
@@ -303,17 +333,18 @@ impl<T: Bus> CPU<T> {
             }
             _ => {}
         }
+        self.reg_pc += (len - 1) as u16;
+        self.cycles_left = instruction.cycle_length;
+
         instruction.operand = operand;
         instruction.raw_operand = operand;
+        instruction.operand = self.decode_operand(&mut instruction);
 
-        self.reg_pc += (len - 1) as u16;
-
-        instruction.operand = self.decode_operand(&instruction);
-        instruction
+        self.next_instruction = Some(instruction);
     }
 
     // TODO: Should this return (Operand, bool) bool=page cross
-    fn decode_operand(&self, instruction: &Instruction) -> u16 {
+    fn decode_operand(&mut self, instruction: &mut Instruction) -> u16 {
         use instruction::AddressingMode::*;
 
         let raw_value = instruction.operand;
@@ -337,20 +368,20 @@ impl<T: Bus> CPU<T> {
             ZeroPageY => (raw_value + self.reg_y as u16) & 0xff,
             Absolute => raw_value,
             AbsoluteX => {
-                raw_value.wrapping_add(self.reg_x as u16)
-                // result.cycles = if on_same_page(self.reg_pc, result.address) {
-                //     0
-                // } else {
-                //     1
-                // };
+                let result = raw_value.wrapping_add(self.reg_x as u16);
+                if !on_same_page(raw_value, result) && !instruction.has_fixed_cycle_length() {
+                    self.cycles_left += 1;
+                };
+
+                result
             }
             AbsoluteY => {
-                raw_value.wrapping_add(self.reg_y as u16)
-                // result.cycles = if on_same_page(self.reg_pc, result.address) {
-                //     0
-                // } else {
-                //     1
-                // };
+                let result = raw_value.wrapping_add(self.reg_y as u16);
+                if !on_same_page(raw_value, result) && !instruction.has_fixed_cycle_length() {
+                    self.cycles_left += 1;
+                };
+
+                result
             }
             Indirect => {
                 // TODO: See if this can be added to trait
@@ -374,18 +405,17 @@ impl<T: Bus> CPU<T> {
                 let hi = self.bus.read((raw_value + 1) & 0xff) as u16;
                 let ptr = (hi << 8) | lo;
 
-                ptr.wrapping_add(self.reg_y as u16)
-                // result.cycles = instruction.get_instruction_len() as u8
-                //     + if on_same_page(result.address, ptr) {
-                //         0
-                //     } else {
-                //         1
-                //     };
+                let result = ptr.wrapping_add(self.reg_y as u16);
+                if !on_same_page(ptr, result) && !instruction.has_fixed_cycle_length() {
+                    self.cycles_left += 1;
+                };
+
+                result
             }
         }
     }
 
-    fn run_instruction(&mut self, instruction: &Instruction) -> RunState {
+    fn execute_instruction(&mut self, instruction: &Instruction) -> RunState {
         use instruction::OpCode::*;
 
         let mut state = RunState::NormalExecution;
@@ -930,7 +960,7 @@ mod tests {
         // The end of this test results file was modified to return 00 instead of FF in the final checks.
         // I believe this can be reverted once memory mapping is in place.
         let test_results =
-            std::fs::read_to_string(".\\src\\test roms\\nestest_no_cycle.log").unwrap();
+            std::fs::read_to_string(".\\src\\test roms\\nestest_no_ppu.log").unwrap();
 
         let mut data = [0; 0x10000];
         let rom_data = &file_data[0x10..0x4010];
@@ -944,13 +974,11 @@ mod tests {
         let mut cpu = CPU::new(bus);
 
         cpu.reset();
-
-        assert_eq!(test_results.lines().next().unwrap(), cpu.trace());
-
-        for line in test_results.lines().skip(1) {
-            let state = cpu.run_next_instruction();
-
+        // assert_eq!(test_results.lines().next().unwrap(), cpu.trace());
+        for line in test_results.lines() {
+            //.skip(1) {
             assert_eq!(line, cpu.trace());
+            let state = cpu.run_next_instruction();
 
             if let RunState::InfiniteLoop(pc) = state {
                 panic!("entered infinite loop: {pc:04X}");

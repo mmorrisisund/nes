@@ -32,6 +32,10 @@ impl Instruction {
     pub fn operand_is_address(&self) -> bool {
         self.addressing_mode.operand_is_address()
     }
+
+    pub fn has_fixed_cycle_length(&self) -> bool {
+        self.op_code.has_fixed_cycle_length()
+    }
 }
 
 impl Display for Instruction {
@@ -140,6 +144,31 @@ pub enum OpCode {
     Kil, // Halt the CPU (CRASH)
 }
 
+impl OpCode {
+    // These opcodes have addressing modes that can cross a page and add a cycle, however, these codes always have a fixed length
+    fn has_fixed_cycle_length(&self) -> bool {
+        self == &OpCode::Sta
+            || self == &OpCode::Asl // read-modify-write instruction
+            || self == &OpCode::Dec // read-modify-write instruction
+            || self == &OpCode::Inc // read-modify-write instruction
+            || self == &OpCode::Lsr // read-modify-write instruction
+            || self == &OpCode::Rol // read-modify-write instruction
+            || self == &OpCode::Ror // read-modify-write instruction
+
+            // unofficial
+            || self == &OpCode::Axa
+            || self == &OpCode::Dcp
+            || self == &OpCode::Isc
+            || self == &OpCode::Rla
+            || self == &OpCode::Rra
+            || self == &OpCode::Slo
+            || self == &OpCode::Sre
+            || self == &OpCode::Shx
+            || self == &OpCode::Shy
+            || self == &OpCode::Tas
+    }
+}
+
 impl Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let code = match self {
@@ -242,11 +271,11 @@ pub enum AddressingMode {
 }
 
 impl AddressingMode {
-    pub fn can_cross_page(&self) -> bool {
-        self == &AddressingMode::AbsoluteX
-            || self == &AddressingMode::AbsoluteY
-            || self == &AddressingMode::IndirectIndexed
-    }
+    // fn can_cross_page(&self) -> bool {
+    //     self == &AddressingMode::AbsoluteX
+    //         || self == &AddressingMode::AbsoluteY
+    //         || self == &AddressingMode::IndirectIndexed
+    // }
 
     fn instruction_length(&self) -> usize {
         match self {
