@@ -1,29 +1,32 @@
+use std::fmt::Display;
+
 #[derive(Clone)]
 pub(super) struct Instruction {
     pub byte_value: u8,
-    pub operand: Operand,
+    pub operand: u16,
     pub op_code: OpCode,
     pub addressing_mode: AddressingMode,
+    pub cycle_length: u8,
+    // TODO: these are only used for tracing.  something better??
     pub(super) is_official: bool,
+    pub(super) raw_operand: u16,
 }
 
 impl Instruction {
     pub fn from_byte(byte: u8) -> Self {
         Self {
             byte_value: byte,
-            operand: Operand::default(),
+            operand: 0,
             op_code: OPCODES[byte as usize],
             addressing_mode: ADDRESSING_MODES[byte as usize],
+            cycle_length: CYCLE_LENGTH[byte as usize],
             is_official: OFFICIAL_STATUS[byte as usize],
+            raw_operand: 0,
         }
     }
 
     pub fn get_instruction_len(&self) -> usize {
         self.addressing_mode.instruction_length()
-    }
-
-    pub fn get_base_cycle_time(&self) -> u8 {
-        self.addressing_mode.cycle_length()
     }
 
     pub fn operand_is_address(&self) -> bool {
@@ -35,29 +38,21 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = match self.addressing_mode {
             Implied => String::new(),
-            Relative => format!("${:02X}", self.operand.address),
-            Immediate => format!("#${:02X}", self.operand.address),
+            Relative => format!("${:02X}", self.operand),
+            Immediate => format!("#${:02X}", self.operand),
             Accumulator => "A".to_string(),
-            ZeroPage => format!("${:02X}", self.operand.address),
-            ZeroPageX => format!("${:02X}, X", self.operand.address),
-            ZeroPageY => format!("${:02X}, Y", self.operand.address),
-            Absolute => format!("${:04X}", self.operand.address),
-            AbsoluteX => format!("${:04X}, X", self.operand.address),
-            AbsoluteY => format!("${:04X}, Y", self.operand.address),
-            Indirect => format!("(${:04X})", self.operand.address),
-            IndexedIndirect => format!("(${:02X}, X)", self.operand.address),
-            IndirectIndexed => format!("(${:02X}), Y", self.operand.address),
+            ZeroPage => format!("${:02X}", self.operand),
+            ZeroPageX => format!("${:02X}, X", self.operand),
+            ZeroPageY => format!("${:02X}, Y", self.operand),
+            Absolute => format!("${:04X}", self.operand),
+            AbsoluteX => format!("${:04X}, X", self.operand),
+            AbsoluteY => format!("${:04X}, Y", self.operand),
+            Indirect => format!("(${:04X})", self.operand),
+            IndexedIndirect => format!("(${:02X}, X)", self.operand),
+            IndirectIndexed => format!("(${:02X}), Y", self.operand),
         };
         write!(f, "{} {}", self.op_code, addr)
     }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(super) struct Operand {
-    pub raw_value: u16,
-    pub address: u16,
-    pub is_address: bool,
-    pub cycles: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -271,24 +266,6 @@ impl AddressingMode {
         }
     }
 
-    pub fn cycle_length(&self) -> u8 {
-        match self {
-            Implied => 2,
-            Relative => 2,
-            Immediate => 2,
-            Accumulator => 2,
-            ZeroPage => 3,
-            ZeroPageX => 4,
-            ZeroPageY => 4,
-            Absolute => 4,
-            AbsoluteX => 4,
-            AbsoluteY => 4,
-            Indirect => 5,
-            IndexedIndirect => 6,
-            IndirectIndexed => 5,
-        }
-    }
-
     fn operand_is_address(&self) -> bool {
         !(self == &AddressingMode::Implied
             || self == &AddressingMode::Immediate
@@ -296,13 +273,11 @@ impl AddressingMode {
     }
 }
 
-use std::fmt::Display;
-
 use OpCode::*;
 
 #[rustfmt::skip]
 const OPCODES: [OpCode; 256] = [
-//  0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
+    //  0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
     Brk, Ora, Kil, Slo, Nop, Ora, Asl, Slo, Php, Ora, Asl, Anc, Nop, Ora, Asl, Slo, // 00
     Bpl, Ora, Kil, Slo, Nop, Ora, Asl, Slo, Clc, Ora, Nop, Slo, Nop, Ora, Asl, Slo, // 10
     Jsr, And, Kil, Rla, Bit, And, Rol, Rla, Plp, And, Rol, Anc, Bit, And, Rol, Rla, // 20
@@ -358,6 +333,27 @@ const ADDRESSING_MODES: [AddressingMode; 256] = [
     Implied,   Immediate,       Implied,     Immediate,       Absolute,  Absolute,  Absolute,  Absolute,  // E8
     Relative,  IndirectIndexed, Implied,     IndirectIndexed, ZeroPageX, ZeroPageX, ZeroPageX, ZeroPageX, // F0
     Implied,   AbsoluteY,       Implied,     AbsoluteY,       AbsoluteX, AbsoluteX, AbsoluteX, AbsoluteX, // F8
+];
+
+#[rustfmt::skip]
+const CYCLE_LENGTH: [u8; 256] = [
+//  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+    7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, // 00
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // 10
+    6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, // 20
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // 30
+    6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6, // 40
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // 50
+    6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6, // 60
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // 70
+    2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, // 80
+    2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5, // 90
+    2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, // A0
+    2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4, // B0
+    2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, // C0
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // D0
+    2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, // E0
+    2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, // F0
 ];
 
 #[rustfmt::skip]

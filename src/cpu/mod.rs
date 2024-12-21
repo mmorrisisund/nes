@@ -1,9 +1,10 @@
 pub mod instruction;
 
-use instruction::{Instruction, OpCode, Operand};
+use instruction::{Instruction, OpCode};
 
 use super::common::Bus;
 
+const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;
 const IRQ_VECTOR_ADDRESS: u16 = 0xfffe;
 
@@ -27,6 +28,10 @@ enum StatusFlag {
     Negative = 1 << 7,
 }
 
+fn on_same_page(addr1: u16, addr2: u16) -> bool {
+    (addr1 & 0xff00) == (addr2 & 0xff00)
+}
+
 pub struct CPU<T: Bus> {
     reg_pc: u16,
     reg_sp: u8,
@@ -36,12 +41,9 @@ pub struct CPU<T: Bus> {
     reg_status: u8,
 
     next_instruction: Option<Instruction>,
+    cycles_left: u64,
 
     bus: T,
-}
-
-fn on_same_page(addr1: u16, addr2: u16) -> bool {
-    (addr1 & 0xff00) == (addr2 & 0xff00)
 }
 
 impl<T: Bus> CPU<T> {
@@ -55,6 +57,7 @@ impl<T: Bus> CPU<T> {
             reg_status: 0,
 
             next_instruction: None,
+            cycles_left: 0,
 
             bus,
         }
@@ -68,6 +71,7 @@ impl<T: Bus> CPU<T> {
         self.reg_sp = STACK_START;
 
         self.reg_status = StatusFlag::InterruptDisable as u8 | 1 << 5; // unused, but always 1
+        self.cycles_left = 7;
 
         self.next_instruction = Some(self.fetch_next_instruction());
     }
@@ -86,10 +90,10 @@ impl<T: Bus> CPU<T> {
         let op_code = instruction.byte_value;
 
         let operands = match instruction.get_instruction_len() {
-            2 => format!("{:02X}", instruction.operand.raw_value as u8),
+            2 => format!("{:02X}", instruction.raw_operand as u8),
             3 => {
-                let lo = (instruction.operand.raw_value & 0xff) as u8;
-                let hi = (instruction.operand.raw_value >> 8 & 0xff) as u8;
+                let lo = (instruction.raw_operand & 0xff) as u8;
+                let hi = (instruction.raw_operand >> 8 & 0xff) as u8;
                 format!("{:02X} {:02X}", lo, hi)
             }
             _ => String::new(),
@@ -100,33 +104,33 @@ impl<T: Bus> CPU<T> {
         let decoded_operand = match instruction.addressing_mode {
             instruction::AddressingMode::Implied => String::new(),
             instruction::AddressingMode::Relative => {
-                format!("${:04X}", instruction.operand.address)
+                format!("${:04X}", instruction.operand)
             }
             instruction::AddressingMode::Immediate => {
-                format!("#${:02X}", instruction.operand.raw_value)
+                format!("#${:02X}", instruction.operand)
             }
             instruction::AddressingMode::Accumulator => "A".to_string(),
             instruction::AddressingMode::ZeroPage => {
-                let addr = instruction.operand.address;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
                 format!("${addr:02X} = {value:02X}")
             }
             instruction::AddressingMode::ZeroPageX => {
-                let base = instruction.operand.raw_value;
-                let addr = instruction.operand.address;
+                let base = instruction.raw_operand;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
 
                 format!("${base:02X},X @ {addr:02X} = {value:02X}")
             }
             instruction::AddressingMode::ZeroPageY => {
-                let base = instruction.operand.raw_value;
-                let addr = instruction.operand.address;
+                let base = instruction.raw_operand;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
 
                 format!("${base:02X},Y @ {addr:02X} = {value:02X}")
             }
             instruction::AddressingMode::Absolute => {
-                let addr = instruction.operand.address;
+                let addr = instruction.raw_operand;
                 let value = self.bus.read(addr);
                 match instruction.op_code {
                     OpCode::Jmp | OpCode::Jsr => format!("${addr:04X}"),
@@ -134,41 +138,41 @@ impl<T: Bus> CPU<T> {
                 }
             }
             instruction::AddressingMode::AbsoluteX => {
-                let base = instruction.operand.raw_value;
-                let addr = instruction.operand.address;
+                let base = instruction.raw_operand;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
 
                 format!("${base:04X},X @ {addr:04X} = {value:02X}")
             }
             instruction::AddressingMode::AbsoluteY => {
-                let base = instruction.operand.raw_value;
-                let addr = instruction.operand.address;
+                let base = instruction.raw_operand;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
 
                 format!("${base:04X},Y @ {addr:04X} = {value:02X}")
             }
             instruction::AddressingMode::Indirect => {
-                let base = instruction.operand.raw_value;
-                let addr = instruction.operand.address;
+                let base = instruction.raw_operand;
+                let addr = instruction.operand;
 
                 format!("(${base:04X}) = {addr:04X}")
             }
             instruction::AddressingMode::IndexedIndirect => {
-                let base = instruction.operand.raw_value as u8;
+                let base = instruction.raw_operand as u8;
                 let ptr = base.wrapping_add(self.reg_x);
-                let addr = instruction.operand.address;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
 
                 format!("(${base:02X},X) @ {ptr:02X} = {addr:04X} = {value:02X}")
             }
             instruction::AddressingMode::IndirectIndexed => {
-                let base = instruction.operand.raw_value;
+                let base = instruction.raw_operand;
 
                 let lo = self.bus.read(base) as u16;
                 let hi = self.bus.read((base + 1) & 0xff) as u16;
                 let ptr = (hi << 8) | lo;
 
-                let addr = instruction.operand.address;
+                let addr = instruction.operand;
                 let value = self.bus.read(addr);
 
                 format!("(${base:02X}),Y = {ptr:04X} @ {addr:04X} = {value:02X}")
@@ -214,27 +218,27 @@ impl<T: Bus> CPU<T> {
         self.set_status(StatusFlag::Negative, result & 0x80 != 0);
     }
 
-    fn get_operand_value(&self, operand: &Operand) -> u8 {
-        if operand.is_address {
-            self.bus.read(operand.address)
+    fn get_operand_value(&self, instruction: &Instruction) -> u8 {
+        if instruction.operand_is_address() {
+            self.bus.read(instruction.operand)
         } else {
-            operand.raw_value as u8
+            instruction.operand as u8
         }
     }
 
-    fn run_bitwise_operation<F>(&mut self, operand: &Operand, operation: F)
+    fn run_bitwise_operation<F>(&mut self, instruction: &Instruction, operation: F)
     where
         F: Fn(u8, u8) -> u8,
     {
-        let operand_value = self.get_operand_value(operand);
+        let operand_value = self.get_operand_value(instruction);
         let result = operation(self.reg_a, operand_value);
 
         self.update_nz_flag(result);
         self.reg_a = result;
     }
 
-    fn run_cmp_operation(&mut self, operand: &Operand, register_value: u8) {
-        let operand_value = self.get_operand_value(operand);
+    fn run_cmp_operation(&mut self, instruction: &Instruction, register_value: u8) {
+        let operand_value = self.get_operand_value(instruction);
         let result = (register_value as u16).wrapping_sub(operand_value as u16);
 
         self.update_nz_flag(result as u8);
@@ -265,8 +269,8 @@ impl<T: Bus> CPU<T> {
         )
     }
 
-    fn run_load_instruction(&mut self, operand: &Operand) -> u8 {
-        let operand_value = self.get_operand_value(operand);
+    fn run_load_instruction(&mut self, instruction: &Instruction) -> u8 {
+        let operand_value = self.get_operand_value(instruction);
         self.update_nz_flag(operand_value);
         operand_value
     }
@@ -299,8 +303,8 @@ impl<T: Bus> CPU<T> {
             }
             _ => {}
         }
-        instruction.operand.raw_value = operand;
-        instruction.operand.is_address = instruction.operand_is_address();
+        instruction.operand = operand;
+        instruction.raw_operand = operand;
 
         self.reg_pc += (len - 1) as u16;
 
@@ -309,18 +313,16 @@ impl<T: Bus> CPU<T> {
     }
 
     // TODO: Should this return (Operand, bool) bool=page cross
-    fn decode_operand(&self, instruction: &Instruction) -> Operand {
+    fn decode_operand(&self, instruction: &Instruction) -> u16 {
         use instruction::AddressingMode::*;
 
-        let mut result = instruction.operand.clone();
-        let raw_value = instruction.operand.raw_value;
+        let raw_value = instruction.operand;
 
         match instruction.addressing_mode {
             // TODO: should Accumulator be separate and actually load Acc?
             Implied | Immediate | Accumulator => {
                 assert!(!instruction.operand_is_address());
-                result.address = raw_value; // TODO: should this be set if it's not an address?? Option??
-                result.cycles = instruction.get_base_cycle_time();
+                raw_value
             }
             Relative => {
                 let sign_extended_value = if raw_value & 0x80 != 0 {
@@ -328,42 +330,27 @@ impl<T: Bus> CPU<T> {
                 } else {
                     raw_value
                 };
-                result.address = self.reg_pc.wrapping_add(sign_extended_value);
-                result.cycles = instruction.get_base_cycle_time();
+                self.reg_pc.wrapping_add(sign_extended_value)
             }
-            ZeroPage => {
-                result.address = raw_value & 0xff;
-                result.cycles = instruction.get_base_cycle_time();
-            }
-            ZeroPageX => {
-                result.address = (raw_value + self.reg_x as u16) & 0xff;
-                result.cycles = instruction.get_base_cycle_time();
-            }
-            ZeroPageY => {
-                result.address = (raw_value + self.reg_y as u16) & 0xff;
-                result.cycles = instruction.get_base_cycle_time();
-            }
-            Absolute => {
-                result.address = raw_value;
-                result.cycles = instruction.get_base_cycle_time();
-            }
+            ZeroPage => raw_value & 0xff,
+            ZeroPageX => (raw_value + self.reg_x as u16) & 0xff,
+            ZeroPageY => (raw_value + self.reg_y as u16) & 0xff,
+            Absolute => raw_value,
             AbsoluteX => {
-                result.address = raw_value.wrapping_add(self.reg_x as u16);
-                result.cycles = if on_same_page(self.reg_pc, result.address) {
-                    0
-                } else {
-                    1
-                };
-                result.cycles += instruction.get_base_cycle_time();
+                raw_value.wrapping_add(self.reg_x as u16)
+                // result.cycles = if on_same_page(self.reg_pc, result.address) {
+                //     0
+                // } else {
+                //     1
+                // };
             }
             AbsoluteY => {
-                result.address = raw_value.wrapping_add(self.reg_y as u16);
-                result.cycles = if on_same_page(self.reg_pc, result.address) {
-                    0
-                } else {
-                    1
-                };
-                result.cycles += instruction.get_base_cycle_time();
+                raw_value.wrapping_add(self.reg_y as u16)
+                // result.cycles = if on_same_page(self.reg_pc, result.address) {
+                //     0
+                // } else {
+                //     1
+                // };
             }
             Indirect => {
                 // TODO: See if this can be added to trait
@@ -373,33 +360,29 @@ impl<T: Bus> CPU<T> {
                 } else {
                     self.bus.read(raw_value + 1)
                 } as u16;
-                result.address = (hi << 8) | lo;
-                result.cycles = instruction.get_base_cycle_time();
+                (hi << 8) | lo
             }
             IndexedIndirect => {
                 let ptr = raw_value.wrapping_add(self.reg_x as u16) & 0xff;
                 let lo = self.bus.read(ptr) as u16;
                 let hi = self.bus.read((ptr + 1) & 0xff) as u16;
 
-                result.address = (hi << 8) | lo;
-                result.cycles = instruction.get_base_cycle_time();
+                (hi << 8) | lo
             }
             IndirectIndexed => {
                 let lo = self.bus.read(raw_value) as u16;
                 let hi = self.bus.read((raw_value + 1) & 0xff) as u16;
                 let ptr = (hi << 8) | lo;
 
-                result.address = ptr.wrapping_add(self.reg_y as u16);
-                result.cycles = instruction.get_instruction_len() as u8
-                    + if on_same_page(result.address, ptr) {
-                        0
-                    } else {
-                        1
-                    };
+                ptr.wrapping_add(self.reg_y as u16)
+                // result.cycles = instruction.get_instruction_len() as u8
+                //     + if on_same_page(result.address, ptr) {
+                //         0
+                //     } else {
+                //         1
+                //     };
             }
         }
-
-        result
     }
 
     fn run_instruction(&mut self, instruction: &Instruction) -> RunState {
@@ -410,12 +393,12 @@ impl<T: Bus> CPU<T> {
         // match opcode and perform action (some actions alter remaining cycle time)
         match instruction.op_code {
             // Access
-            Lda => self.reg_a = self.run_load_instruction(&instruction.operand),
-            Sta => self.bus.write(instruction.operand.address, self.reg_a),
-            Ldx => self.reg_x = self.run_load_instruction(&instruction.operand),
-            Stx => self.bus.write(instruction.operand.address, self.reg_x),
-            Ldy => self.reg_y = self.run_load_instruction(&instruction.operand),
-            Sty => self.bus.write(instruction.operand.address, self.reg_y),
+            Lda => self.reg_a = self.run_load_instruction(instruction),
+            Sta => self.bus.write(instruction.operand, self.reg_a),
+            Ldx => self.reg_x = self.run_load_instruction(instruction),
+            Stx => self.bus.write(instruction.operand, self.reg_x),
+            Ldy => self.reg_y = self.run_load_instruction(instruction),
+            Sty => self.bus.write(instruction.operand, self.reg_y),
 
             // Transfer
             Tax => {
@@ -436,10 +419,10 @@ impl<T: Bus> CPU<T> {
             }
 
             // Arithmetic
-            Adc => self.adc(&instruction.operand),
-            Sbc => self.sbc(&instruction.operand),
-            Inc => self.inc(instruction.operand.address),
-            Dec => self.dec(instruction.operand.address),
+            Adc => self.adc(instruction),
+            Sbc => self.sbc(instruction),
+            Inc => self.inc(instruction.operand),
+            Dec => self.dec(instruction.operand),
             Inx => {
                 self.reg_x = self.reg_x.wrapping_add(1);
                 self.update_nz_flag(self.reg_x);
@@ -458,17 +441,17 @@ impl<T: Bus> CPU<T> {
             }
 
             // Shift
-            Asl => self.asl(&instruction.operand),
-            Lsr => self.lsr(&instruction.operand),
-            Rol => self.rol(&instruction.operand),
-            Ror => self.ror(&instruction.operand),
+            Asl => self.asl(instruction),
+            Lsr => self.lsr(instruction),
+            Rol => self.rol(instruction),
+            Ror => self.ror(instruction),
 
             // Bitwise
-            And => self.and(&instruction.operand),
-            Eor => self.eor(&instruction.operand),
-            Ora => self.ora(&instruction.operand),
+            And => self.and(instruction),
+            Eor => self.eor(instruction),
+            Ora => self.ora(instruction),
             Bit => {
-                let data = self.bus.read(instruction.operand.address);
+                let data = self.bus.read(instruction.operand);
 
                 self.set_status(StatusFlag::Zero, self.reg_a & data == 0);
                 self.set_status(StatusFlag::Overflow, data & StatusFlag::Overflow as u8 != 0);
@@ -476,14 +459,14 @@ impl<T: Bus> CPU<T> {
             }
 
             // Compare
-            Cmp => self.run_cmp_operation(&instruction.operand, self.reg_a),
-            Cpx => self.run_cmp_operation(&instruction.operand, self.reg_x),
-            Cpy => self.run_cmp_operation(&instruction.operand, self.reg_y),
+            Cmp => self.run_cmp_operation(instruction, self.reg_a),
+            Cpx => self.run_cmp_operation(instruction, self.reg_x),
+            Cpy => self.run_cmp_operation(instruction, self.reg_y),
 
             // Branch
             Bcc => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Carry as u8 == 0, // TODO: update this to use central function is_set
                 );
                 // todo: update cycles remaining
@@ -491,7 +474,7 @@ impl<T: Bus> CPU<T> {
             }
             Bcs => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Carry as u8 != 0,
                 );
                 // todo: update cycles remaining
@@ -499,7 +482,7 @@ impl<T: Bus> CPU<T> {
             }
             Beq => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Zero as u8 != 0,
                 );
                 // todo: update cycles remaining
@@ -507,7 +490,7 @@ impl<T: Bus> CPU<T> {
             }
             Bne => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Zero as u8 == 0,
                 );
                 // todo: update cycles remaining
@@ -515,7 +498,7 @@ impl<T: Bus> CPU<T> {
             }
             Bpl => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Negative as u8 == 0,
                 );
                 // todo: update cycles remaining
@@ -523,7 +506,7 @@ impl<T: Bus> CPU<T> {
             }
             Bmi => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Negative as u8 != 0,
                 );
                 // todo: update cycles remaining
@@ -531,7 +514,7 @@ impl<T: Bus> CPU<T> {
             }
             Bvc => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Overflow as u8 == 0,
                 );
                 // todo: update cycles remaining
@@ -539,7 +522,7 @@ impl<T: Bus> CPU<T> {
             }
             Bvs => {
                 let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand.address,
+                    instruction.operand,
                     self.reg_status & StatusFlag::Overflow as u8 != 0,
                 );
                 // todo: update cycles remaining
@@ -551,7 +534,7 @@ impl<T: Bus> CPU<T> {
                 // TODO: handle 6502 jump bug
                 // TODO: adjust cycle time
                 let instruction_start = self.reg_pc.wrapping_sub(3);
-                self.reg_pc = instruction.operand.address;
+                self.reg_pc = instruction.operand;
 
                 if instruction_start == self.reg_pc {
                     state = RunState::InfiniteLoop(instruction_start);
@@ -562,7 +545,7 @@ impl<T: Bus> CPU<T> {
                     self.reg_pc.wrapping_add(2) - instruction.get_instruction_len() as u16;
                 self.push_stack(((return_addr >> 8) & 0xff) as u8);
                 self.push_stack((return_addr & 0xff) as u8);
-                self.reg_pc = instruction.operand.address;
+                self.reg_pc = instruction.operand;
             }
             Rts => {
                 let lo = self.pop_stack() as u16;
@@ -626,19 +609,19 @@ impl<T: Bus> CPU<T> {
             // Unofficial
             // TODO: will probably need to track cycles before calls and reset after
             Alr => {
-                self.and(&instruction.operand);
-                self.lsr(&instruction.operand);
+                self.and(instruction);
+                self.lsr(instruction);
             }
             Anc => {
-                self.and(&instruction.operand);
+                self.and(instruction);
                 self.set_status(StatusFlag::Carry, self.is_set(StatusFlag::Negative));
             }
             Arr => {
-                self.and(&instruction.operand);
+                self.and(instruction);
 
-                let mut ror_ins = instruction.clone();
-                ror_ins.operand.is_address = false;
-                self.ror(&ror_ins.operand);
+                // let mut ror_ins = instruction.clone();
+                // ror_ins.operand.is_address = false;  // this might already be false based on addressing mode
+                self.ror(instruction);
 
                 self.set_status(StatusFlag::Carry, (self.reg_a >> 6) & 1 != 0);
                 self.set_status(
@@ -648,50 +631,49 @@ impl<T: Bus> CPU<T> {
             }
             Axs => {
                 let result = self.reg_a & self.reg_x;
-                self.bus.write(instruction.operand.address, result);
+                self.bus.write(instruction.operand, result);
             }
             Lax => {
-                let data = self.bus.read(instruction.operand.address);
+                let data = self.bus.read(instruction.operand);
                 self.reg_a = data;
                 self.reg_x = data;
                 self.update_nz_flag(data);
             }
             Sax => {
-                self.bus
-                    .write(instruction.operand.address, self.reg_a & self.reg_x);
+                self.bus.write(instruction.operand, self.reg_a & self.reg_x);
             }
 
             Dcp => {
-                self.dec(instruction.operand.address);
-                self.run_cmp_operation(&instruction.operand, self.reg_a);
+                self.dec(instruction.operand);
+                self.run_cmp_operation(instruction, self.reg_a);
             }
             Isc => {
-                self.inc(instruction.operand.address);
-                self.sbc(&instruction.operand);
+                self.inc(instruction.operand);
+                self.sbc(instruction);
             }
             Rla => {
-                self.rol(&instruction.operand);
-                self.and(&instruction.operand);
+                self.rol(instruction);
+                self.and(instruction);
             }
             Rra => {
-                self.ror(&instruction.operand);
-                self.adc(&instruction.operand);
+                self.ror(instruction);
+                self.adc(instruction);
             }
             Slo => {
-                self.asl(&instruction.operand);
-                self.ora(&instruction.operand);
+                self.asl(instruction);
+                self.ora(instruction);
             }
             Sre => {
-                self.lsr(&instruction.operand);
-                self.eor(&instruction.operand);
+                self.lsr(instruction);
+                self.eor(instruction);
             }
 
             Atx => {
-                self.and(&instruction.operand);
+                self.and(instruction);
                 self.reg_x = self.reg_a;
             }
             Las => {
-                let result = self.bus.read(instruction.operand.address) & self.reg_sp;
+                let result = self.bus.read(instruction.operand) & self.reg_sp;
 
                 self.update_nz_flag(result);
                 self.reg_a = result;
@@ -699,43 +681,43 @@ impl<T: Bus> CPU<T> {
                 self.reg_sp = result;
             }
             Axa => {
-                let hi = (instruction.operand.address >> 8) as u8;
+                let hi = (instruction.operand >> 8) as u8;
                 let value = self.reg_a & self.reg_x & (hi + 1);
 
                 // TODO: on page cross, value becomes hi of the store (hi << 8) | lo
-                self.bus.write(instruction.operand.address, value);
+                self.bus.write(instruction.operand, value);
             }
             Shx => {
-                let hi = (instruction.operand.address >> 8) as u8;
+                let hi = (instruction.operand >> 8) as u8;
                 let value = self.reg_x & hi;
 
                 // TODO: The value to be stored is copied also
                 //       to ADDR_HI if page boundary is crossed.
 
-                self.bus.write(instruction.operand.address, value);
+                self.bus.write(instruction.operand, value);
             }
             Shy => {
-                let hi = (instruction.operand.address >> 8) as u8;
+                let hi = (instruction.operand >> 8) as u8;
                 let value = self.reg_y & hi;
 
                 // TODO: The value to be stored is copied also
                 //       to ADDR_HI if page boundary is crossed.
 
-                self.bus.write(instruction.operand.address, value);
+                self.bus.write(instruction.operand, value);
             }
             Tas => {
                 self.reg_sp = self.reg_a & self.reg_x;
 
-                let hi = (instruction.operand.address >> 8) as u8;
+                let hi = (instruction.operand >> 8) as u8;
                 let value = self.reg_sp & hi;
 
                 // TODO: The value to be stored is copied also
                 //       to ADDR_HI if page boundary is crossed.
-                self.bus.write(instruction.operand.address, value);
+                self.bus.write(instruction.operand, value);
             }
             Xaa => {
                 self.reg_a = self.reg_x;
-                self.and(&instruction.operand);
+                self.and(instruction);
             }
 
             Kil => {
@@ -748,8 +730,8 @@ impl<T: Bus> CPU<T> {
     }
 
     // arithmetic
-    fn adc(&mut self, operand: &Operand) {
-        let operand_value = self.get_operand_value(operand);
+    fn adc(&mut self, instruction: &Instruction) {
+        let operand_value = self.get_operand_value(instruction);
         let carry_value = (self.reg_status & 0x01) as u16; // works b/c carry is bit0
 
         let result = (self.reg_a as u16)
@@ -766,8 +748,8 @@ impl<T: Bus> CPU<T> {
         self.reg_a = result;
     }
 
-    fn sbc(&mut self, operand: &Operand) {
-        let operand_value = self.get_operand_value(operand);
+    fn sbc(&mut self, instruction: &Instruction) {
+        let operand_value = self.get_operand_value(instruction);
         let carry_value = (self.reg_status & 0x01) as u16; // works b/c carry is bit0
 
         let result = (self.reg_a as u16)
@@ -801,17 +783,17 @@ impl<T: Bus> CPU<T> {
     }
 
     // shifts
-    fn asl(&mut self, operand: &Operand) {
-        let value = if operand.is_address {
-            self.bus.read(operand.address)
+    fn asl(&mut self, instruction: &Instruction) {
+        let value = if instruction.operand_is_address() {
+            self.bus.read(instruction.operand)
         } else {
             self.reg_a
         };
 
         let new_value = value << 1;
 
-        if operand.is_address {
-            self.bus.write(operand.address, new_value)
+        if instruction.operand_is_address() {
+            self.bus.write(instruction.operand, new_value)
         } else {
             self.reg_a = new_value
         }
@@ -819,17 +801,17 @@ impl<T: Bus> CPU<T> {
         self.set_status(StatusFlag::Carry, value & 0x80 != 0);
     }
 
-    fn lsr(&mut self, operand: &Operand) {
-        let value = if operand.is_address {
-            self.bus.read(operand.address)
+    fn lsr(&mut self, instruction: &Instruction) {
+        let value = if instruction.operand_is_address() {
+            self.bus.read(instruction.operand)
         } else {
             self.reg_a
         };
 
         let new_value = value >> 1;
 
-        if operand.is_address {
-            self.bus.write(operand.address, new_value);
+        if instruction.operand_is_address() {
+            self.bus.write(instruction.operand, new_value);
         } else {
             self.reg_a = new_value;
         }
@@ -837,9 +819,9 @@ impl<T: Bus> CPU<T> {
         self.update_nz_flag(new_value);
     }
 
-    fn rol(&mut self, operand: &Operand) {
-        let value = if operand.is_address {
-            self.bus.read(operand.address)
+    fn rol(&mut self, instruction: &Instruction) {
+        let value = if instruction.operand_is_address() {
+            self.bus.read(instruction.operand)
         } else {
             self.reg_a
         };
@@ -847,8 +829,8 @@ impl<T: Bus> CPU<T> {
         let mut new_value = value << 1;
         new_value |= self.reg_status & StatusFlag::Carry as u8; // this works b/c carry flag is bit0
 
-        if operand.is_address {
-            self.bus.write(operand.address, new_value);
+        if instruction.operand_is_address() {
+            self.bus.write(instruction.operand, new_value);
         } else {
             self.reg_a = new_value;
         }
@@ -856,9 +838,9 @@ impl<T: Bus> CPU<T> {
         self.update_nz_flag(new_value);
     }
 
-    fn ror(&mut self, operand: &Operand) {
-        let value = if operand.is_address {
-            self.bus.read(operand.address)
+    fn ror(&mut self, instruction: &Instruction) {
+        let value = if instruction.operand_is_address() {
+            self.bus.read(instruction.operand)
         } else {
             self.reg_a
         };
@@ -870,8 +852,8 @@ impl<T: Bus> CPU<T> {
             0x00
         };
 
-        if operand.is_address {
-            self.bus.write(operand.address, new_value);
+        if instruction.operand_is_address() {
+            self.bus.write(instruction.operand, new_value);
         } else {
             self.reg_a = new_value;
         }
@@ -880,16 +862,16 @@ impl<T: Bus> CPU<T> {
     }
 
     // bitwise
-    fn and(&mut self, operand: &Operand) {
-        self.run_bitwise_operation(operand, |a, b| a & b);
+    fn and(&mut self, instruction: &Instruction) {
+        self.run_bitwise_operation(instruction, |a, b| a & b);
     }
 
-    fn eor(&mut self, operand: &Operand) {
-        self.run_bitwise_operation(operand, |a, b| a ^ b);
+    fn eor(&mut self, instruction: &Instruction) {
+        self.run_bitwise_operation(instruction, |a, b| a ^ b);
     }
 
-    fn ora(&mut self, operand: &Operand) {
-        self.run_bitwise_operation(operand, |a, b| a | b);
+    fn ora(&mut self, instruction: &Instruction) {
+        self.run_bitwise_operation(instruction, |a, b| a | b);
     }
 }
 
