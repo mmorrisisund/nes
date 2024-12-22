@@ -1,0 +1,273 @@
+mod error;
+
+use std::{
+    fs::File,
+    io::{Read, Seek},
+    path::Path,
+};
+
+use error::CartridgeError;
+
+use crate::common::Bus;
+
+#[derive(Debug)]
+struct INesHeader {
+    prg_rom_size: u8,
+    chr_rom_size: u8,
+    vertical_mirroring_set: bool,
+    four_screen_mirroring_set: bool,
+    has_battery_ram: bool,
+    has_trainer: bool,
+    mapper: u8,
+    prg_ram_size: u8,
+}
+
+impl INesHeader {
+    pub fn from_bytes(header: &[u8]) -> Result<Self, CartridgeError> {
+        if header.len() < 16 {
+            return Err(CartridgeError::InvalidHeader);
+        }
+        Self::check_magic(&header[..4])?;
+
+        let prg_rom_size = header[4];
+        let chr_rom_size = header[5];
+        let control1 = header[6];
+        let control2 = header[7];
+        let prg_ram_size = header[8];
+        let display_type = header[9];
+        let reserved = &header[10..16];
+
+        let (vertical_mirroring_set, has_battery_ram, has_trainer, four_screen_mirroring_set, lo) =
+            Self::parse_control1(control1);
+
+        let (is_ines2, hi) = Self::parse_control2(control2);
+        let mapper = hi | lo;
+
+        if is_ines2 {
+            return Err(CartridgeError::UnsupportedVersion);
+        }
+
+        if reserved.iter().any(|byte| *byte != 0) {
+            return Err(CartridgeError::InvalidHeader);
+        }
+
+        if display_type != 0 {
+            return Err(CartridgeError::PALNotSupported);
+        }
+
+        Ok(INesHeader {
+            prg_rom_size,
+            chr_rom_size,
+            vertical_mirroring_set,
+            four_screen_mirroring_set,
+            has_battery_ram,
+            has_trainer,
+            mapper,
+            prg_ram_size,
+        })
+    }
+
+    fn check_magic(bytes: &[u8]) -> Result<(), CartridgeError> {
+        let magic_bytes = [0x4E, 0x45, 0x53, 0x1A];
+
+        if bytes == magic_bytes {
+            Ok(())
+        } else {
+            Err(CartridgeError::InvalidHeader)
+        }
+    }
+
+    fn parse_control1(mut byte: u8) -> (bool, bool, bool, bool, u8) {
+        let has_vertical = byte & 0x01 == 0;
+        byte >>= 1;
+
+        let has_battery = byte & 0x01 == 1;
+        byte >>= 1;
+
+        let has_trainer = byte & 0x01 == 1;
+        byte >>= 1;
+
+        let has_four_screen = byte & 0x01 == 1;
+        byte >>= 1;
+
+        let lo = byte & 0xf;
+
+        (has_vertical, has_battery, has_trainer, has_four_screen, lo)
+    }
+
+    fn parse_control2(mut byte: u8) -> (bool, u8) {
+        // ignore first 2 bits, not in official spec
+        byte >>= 2;
+
+        let is_ines2 = byte & 0b10 == 2;
+        byte >>= 2;
+
+        let hi = byte & 0xf;
+
+        (is_ines2, hi << 4)
+    }
+}
+
+pub struct Cartridge {
+    header: INesHeader,
+    prg_rom: Vec<u8>,
+    chr_rom: Vec<u8>,
+    prg_ram: Vec<u8>,
+}
+
+impl Cartridge {
+    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, CartridgeError> {
+        if let Some(extension) = file_path.as_ref().extension() {
+            if extension == "nes" {
+                let mut file = File::open(file_path)?;
+
+                let mut header = [0; 16];
+                file.read_exact(&mut header)?;
+                let header = INesHeader::from_bytes(&header)?;
+
+                if header.has_trainer {
+                    let mut _trainer = [0; 512];
+                    file.read_exact(&mut _trainer)?;
+                }
+
+                let mut prg_rom = vec![0; header.prg_rom_size as usize * 16 * 1024];
+                file.read_exact(&mut prg_rom)?;
+
+                let mut chr_rom = vec![0; header.chr_rom_size as usize * 8 * 1024];
+                file.read_exact(&mut chr_rom)?;
+
+                // TODO: load sram (saved data; batter pack)
+                let prg_ram = vec![0; header.prg_ram_size as usize * 8 * 1024];
+
+                let current_position = file.stream_position()?;
+                let end = file.seek(std::io::SeekFrom::End(0))?;
+                if current_position != end {
+                    return Err(CartridgeError::FileTooLarge(end - current_position));
+                }
+
+                Ok(Self {
+                    header,
+                    prg_rom,
+                    chr_rom,
+                    prg_ram,
+                })
+            } else {
+                Err(CartridgeError::UnsupportedFile)
+            }
+        } else {
+            Err(CartridgeError::UnsupportedFile)
+        }
+    }
+}
+
+impl Bus for Cartridge {
+    fn read(&self, address: u16) -> u8 {
+        match address {
+            0x0000..0x2000 => self.chr_rom[address as usize],
+            0x2000..0x6000 => unreachable!(),
+            0x6000..0x8000 => self.prg_ram[address as usize],
+            0x8000.. => self.prg_rom[address as usize],
+        }
+    }
+
+    fn write(&mut self, address: u16, data: u8) {
+        match address {
+            0x0000..0x2000 => self.chr_rom[address as usize] = data,
+            0x2000..0x6000 => unreachable!(),
+            0x6000..0x8000 => self.prg_ram[address as usize] = data,
+            0x8000.. => self.prg_rom[address as usize] = data,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+
+    const HEADER: [u8; 16] = [
+        0x4e, 0x45, 0x53, 0x1a, 0x10, 0x10, 0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+
+    #[test]
+    fn check_magic_success() {
+        let header = INesHeader::from_bytes(&HEADER);
+
+        assert!(header.is_ok());
+    }
+
+    #[test]
+    fn check_magic_failure() {
+        let header = INesHeader::from_bytes(&[0x01, 0x02, 0x03, 0x04]);
+
+        assert!(header.is_err());
+    }
+
+    #[test]
+    fn file_not_found() {
+        let err = Cartridge::from_file("../fake_dir/not_real.nes")
+            .err()
+            .expect("should be an error");
+
+        if let CartridgeError::IOError(file_err) = err {
+            assert_eq!(file_err.kind(), ErrorKind::NotFound);
+        } else {
+            panic!("did not receive IO Error, received: {err:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_extension() {
+        let err = Cartridge::from_file("../fake_dir/game.notnes")
+            .err()
+            .expect("should be an error");
+
+        if let CartridgeError::UnsupportedFile = err {
+            // success
+        } else {
+            panic!("did not receive UnsupportedFile error, received: {err:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_header() {
+        // let f = include_bytes!("../test roms/cartridge_tests/wrong_header.nes");
+        let err = Cartridge::from_file("./src/test_roms/cartridge/wrong_header.nes")
+            .err()
+            .expect("should be an error");
+
+        if let CartridgeError::InvalidHeader = err {
+            // success
+        } else {
+            panic!("did not receive InvalidHeader error, received: {err:?}");
+        }
+    }
+
+    #[test]
+    fn large_file() {
+        let err = Cartridge::from_file("./src/test_roms/cartridge/large_file.nes")
+            .err()
+            .expect("should be an error");
+
+        if let CartridgeError::FileTooLarge(_) = err {
+            // success
+        } else {
+            panic!("did not receive a FileTooLarge error, received: {err:?}");
+        }
+    }
+
+    #[test]
+    fn valid_cartridge_created() {
+        let cart = Cartridge::from_file("./src/test_roms/cartridge/creation.nes")
+            .expect("should be successful");
+
+        for c in cart.prg_rom {
+            assert_eq!(c, 0xff);
+        }
+
+        for c in cart.chr_rom {
+            assert_eq!(c, 0xee);
+        }
+    }
+}
