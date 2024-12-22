@@ -48,6 +48,7 @@ pub struct CPU<T: Bus> {
     bus: T,
 }
 
+// Public
 impl<T: Bus> CPU<T> {
     pub fn new(bus: T) -> Self {
         Self {
@@ -82,6 +83,12 @@ impl<T: Bus> CPU<T> {
         self.total_cycles += 1;
 
         if self.cycles_left == 0 && self.next_instruction.is_none() {
+            // if interrupt check
+
+            // else
+            // - check for irq change request
+
+            // - fetch
             self.fetch_next_instruction();
             self.cycles_left -= 1;
 
@@ -222,6 +229,7 @@ impl<T: Bus> CPU<T> {
     }
 }
 
+// Private
 impl<T: Bus> CPU<T> {
     fn set_flag(&mut self, flag: StatusFlag) {
         self.reg_status |= flag as u8;
@@ -279,7 +287,7 @@ impl<T: Bus> CPU<T> {
     fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> (u8, RunState) {
         // TODO: Remove cycles and return value
         let cycles = 0;
-        let instruction_start = self.reg_pc.wrapping_sub(2);
+        let pc_start = self.reg_pc.wrapping_sub(2);
 
         if condition {
             if !on_same_page(self.reg_pc, new_addr) {
@@ -291,8 +299,8 @@ impl<T: Bus> CPU<T> {
 
         (
             cycles,
-            if condition && instruction_start == new_addr {
-                RunState::InfiniteLoop(instruction_start)
+            if condition && pc_start == new_addr {
+                RunState::InfiniteLoop(pc_start)
             } else {
                 RunState::NormalExecution
             },
@@ -925,7 +933,7 @@ mod tests {
 
     #[test]
     fn test_functionality() {
-        let file_data = include_bytes!("..\\test roms\\6502_functional_test.bin");
+        let file_data = include_bytes!("../test_roms/cpu/functional/6502_functional_test.bin");
         let mut data = [0; 0x10000];
 
         data[0xa..file_data.len() + 0xa].clone_from_slice(file_data);
@@ -940,6 +948,7 @@ mod tests {
 
         cpu.reset();
         loop {
+            println!("{}", cpu.trace());
             let state = cpu.run_next_instruction();
 
             // if we stuck in a loop, return error
@@ -956,11 +965,11 @@ mod tests {
 
     #[test]
     fn test_nestest() {
-        let file_data = include_bytes!("..\\test roms\\nestest.nes");
+        let file_data = include_bytes!("../test_roms/nes/nestest/nestest.nes");
         // The end of this test results file was modified to return 00 instead of FF in the final checks.
         // I believe this can be reverted once memory mapping is in place.
         let test_results =
-            std::fs::read_to_string(".\\src\\test roms\\nestest_no_ppu.log").unwrap();
+            std::fs::read_to_string("./src/test_roms/nes/nestest/nestest_no_ppu.log").unwrap();
 
         let mut data = [0; 0x10000];
         let rom_data = &file_data[0x10..0x4010];
@@ -986,16 +995,12 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn test_timing() {
-        let file_data = include_bytes!("..\\test roms\\instr_timing.nes");
+        let file_data = include_bytes!("../test_roms/cpu/instr_timing/instr_timing.nes");
         let mut data = [0; 0x10000];
 
-        data[0..file_data.len()].clone_from_slice(file_data);
-
-        // data[0xfffc] = 0x00;
-        // data[0xfffd] = 0x04;
+        data[0x8000..0x8000 + file_data.len() - 0x10].clone_from_slice(&file_data[0x10..]);
 
         let bus = TestBus { data };
         let mut cpu = CPU::new(bus);
@@ -1004,6 +1009,7 @@ mod tests {
 
         cpu.reset();
         loop {
+            println!("{}", cpu.trace());
             let state = cpu.run_next_instruction();
 
             // if we stuck in a loop, return error
