@@ -306,7 +306,7 @@ use OpCode::*;
 
 #[rustfmt::skip]
 const OPCODES: [OpCode; 256] = [
-    //  0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
+//  0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
     Brk, Ora, Kil, Slo, Nop, Ora, Asl, Slo, Php, Ora, Asl, Anc, Nop, Ora, Asl, Slo, // 00
     Bpl, Ora, Kil, Slo, Nop, Ora, Asl, Slo, Clc, Ora, Nop, Slo, Nop, Ora, Asl, Slo, // 10
     Jsr, And, Kil, Rla, Bit, And, Rol, Rla, Plp, And, Rol, Anc, Bit, And, Rol, Rla, // 20

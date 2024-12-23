@@ -227,6 +227,10 @@ impl<T: Bus> CPU<T> {
 
         format!("{asm:47} {regs}")
     }
+
+    pub fn bus(&self) -> &T {
+        &self.bus
+    }
 }
 
 // Private
@@ -915,24 +919,93 @@ impl<T: Bus> CPU<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::cartridge::TestCartridge;
+
     use super::*;
 
-    struct TestBus {
+    struct TestBusRom {
+        pub cartridge: TestCartridge,
+        ram: [u8; 0x800],
+    }
+
+    impl Bus for TestBusRom {
+        fn read(&self, address: u16) -> u8 {
+            match address {
+                0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
+                0x2000..0x4000 => 0,                                    // ppu
+                0x4000..0x4018 => 0,                                    // apu
+                0x4018..0x4020 => 0,                                    // unused
+                0x4020.. => self.cartridge.read(address),               // cartridge
+            }
+        }
+
+        fn write(&mut self, address: u16, data: u8) {
+            match address {
+                0x0000..0x2000 => self.ram[(address & 0x7ff) as usize] = data, // ram
+                0x2000..0x4000 => {}                                           // ppu
+                0x4000..0x4018 => {}                                           // apu
+                0x4018..0x4020 => {}                                           // unused
+                0x4020.. => self.cartridge.write(address, data),               // cartridge
+            }
+        }
+    }
+
+    struct TestBusBin {
         data: [u8; 0x10000],
     }
 
-    impl Bus for TestBus {
+    impl Bus for TestBusBin {
         fn read(&self, address: u16) -> u8 {
             self.data[address as usize]
         }
 
         fn write(&mut self, address: u16, data: u8) {
+            match address {
+                0x0002 | 0x0003 => println!("write: {data:02X}"),
+                _ => {}
+            }
             self.data[address as usize] = data;
         }
     }
 
+    fn cycle_until_infinite(cpu: &mut CPU<TestBusRom>) {
+        loop {
+            let state = cpu.cycle_tick();
+            if let RunState::InfiniteLoop(_) = state {
+                return;
+            }
+        }
+    }
+
+    fn cycle_until_mem_neq(cpu: &mut CPU<TestBusRom>, address: u16, value: u8) {
+        loop {
+            cpu.cycle_tick();
+
+            if cpu.bus().read(address) != value {
+                return;
+            }
+        }
+    }
+
+    fn execute_blargg_test(file_path: &str) {
+        let cartridge = TestCartridge::from_file(file_path).unwrap();
+        let bus = TestBusRom {
+            cartridge,
+            ram: [0; 0x800],
+        };
+        let mut cpu = CPU::new(bus);
+
+        cpu.reset();
+
+        cycle_until_infinite(&mut cpu);
+        cycle_until_mem_neq(&mut cpu, 0x6000, 0x80);
+
+        let result = cpu.bus.read(0x6000);
+        assert_eq!(result, 0, "\n\ntrace: {}\n", cpu.trace());
+    }
+
     #[test]
-    fn test_functionality() {
+    fn functionality() {
         let file_data = include_bytes!("../test_roms/cpu/functional/6502_functional_test.bin");
         let mut data = [0; 0x10000];
 
@@ -941,14 +1014,14 @@ mod tests {
         data[0xfffc] = 0x00;
         data[0xfffd] = 0x04;
 
-        let bus = TestBus { data };
+        let bus = TestBusBin { data };
         let mut cpu = CPU::new(bus);
 
         const SUCCESS_ADDRESS: u16 = 0x336d;
 
         cpu.reset();
         loop {
-            println!("{}", cpu.trace());
+            // println!("{}", cpu.trace());
             let state = cpu.run_next_instruction();
 
             // if we stuck in a loop, return error
@@ -964,29 +1037,33 @@ mod tests {
     }
 
     #[test]
-    fn test_nestest() {
-        let file_data = include_bytes!("../test_roms/nes/nestest/nestest.nes");
+    fn nestest() {
+        let mut cartridge =
+            TestCartridge::from_file("./src/test_roms/nes/nestest/nestest.nes").unwrap();
+
+        // rom needs program code mirrored, default reset vector is wrong
+        let mut rom = cartridge.get_prg_rom();
+        let mut new_rom = rom.clone();
+        new_rom.append(&mut rom);
+
+        cartridge.set_prg_rom(new_rom);
+        cartridge.write(0xfffc, 0x00);
+        cartridge.write(0xfffd, 0xc0);
+
+        let bus = TestBusRom {
+            cartridge,
+            ram: [0; 0x800],
+        };
+        let mut cpu = CPU::new(bus);
+
         // The end of this test results file was modified to return 00 instead of FF in the final checks.
-        // I believe this can be reverted once memory mapping is in place.
+        // I believe this can be reverted once memory mapping and/or ppu is in place.
         let test_results =
             std::fs::read_to_string("./src/test_roms/nes/nestest/nestest_no_ppu.log").unwrap();
 
-        let mut data = [0; 0x10000];
-        let rom_data = &file_data[0x10..0x4010];
-        data[0x8000..0xc000].clone_from_slice(rom_data);
-        data[0xc000..].clone_from_slice(rom_data);
-
-        data[0xfffc] = 0x00;
-        data[0xfffd] = 0xc0;
-
-        let bus = TestBus { data };
-        let mut cpu = CPU::new(bus);
-
         cpu.reset();
-        // assert_eq!(test_results.lines().next().unwrap(), cpu.trace());
         for line in test_results.lines() {
-            //.skip(1) {
-            assert_eq!(line, cpu.trace());
+            assert_eq!(cpu.trace(), line);
             let state = cpu.run_next_instruction();
 
             if let RunState::InfiniteLoop(pc) = state {
@@ -996,31 +1073,12 @@ mod tests {
     }
 
     #[test]
-    fn test_timing() {
-        let file_data = include_bytes!("../test_roms/cpu/instr_timing/instr_timing.nes");
-        let mut data = [0; 0x10000];
+    fn all_instrs() {
+        execute_blargg_test("./src/test_roms/cpu/instr_function/all_instrs.nes");
+    }
 
-        data[0x8000..0x8000 + file_data.len() - 0x10].clone_from_slice(&file_data[0x10..]);
-
-        let bus = TestBus { data };
-        let mut cpu = CPU::new(bus);
-
-        const SUCCESS_ADDRESS: u16 = 0x336d;
-
-        cpu.reset();
-        loop {
-            println!("{}", cpu.trace());
-            let state = cpu.run_next_instruction();
-
-            // if we stuck in a loop, return error
-            if let RunState::InfiniteLoop(pc) = state {
-                assert!(
-                    pc == SUCCESS_ADDRESS,
-                    "Test failed at {:04X}, check the `.lst` file for more info",
-                    pc
-                );
-                break;
-            }
-        }
+    #[test]
+    fn instr_timing() {
+        execute_blargg_test("./src/test_roms/cpu/instr_timing/instr_timing.nes");
     }
 }

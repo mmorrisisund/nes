@@ -1,15 +1,13 @@
 mod error;
 
-use std::{
-    fs::File,
-    io::{Read, Seek},
-    path::Path,
-};
-
-use error::CartridgeError;
+use std::fs::File;
+use std::io::{Read, Seek};
+use std::path::Path;
 
 use crate::common::Bus;
+pub use error::CartridgeError;
 
+#[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
 #[derive(Debug)]
 struct INesHeader {
     prg_rom_size: u8,
@@ -67,6 +65,10 @@ impl INesHeader {
         })
     }
 
+    fn empty() -> Self {
+        Self::from_bytes(&[0x4E, 0x45, 0x53, 0x1A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap()
+    }
+
     fn check_magic(bytes: &[u8]) -> Result<(), CartridgeError> {
         let magic_bytes = [0x4E, 0x45, 0x53, 0x1A];
 
@@ -108,6 +110,7 @@ impl INesHeader {
     }
 }
 
+#[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
 pub struct Cartridge {
     header: INesHeader,
     prg_rom: Vec<u8>,
@@ -137,7 +140,8 @@ impl Cartridge {
                 file.read_exact(&mut chr_rom)?;
 
                 // TODO: load sram (saved data; batter pack)
-                let prg_ram = vec![0; header.prg_ram_size as usize * 8 * 1024];
+                let ram_size = std::cmp::max(1, header.prg_ram_size);
+                let prg_ram = vec![0; ram_size as usize * 8 * 1024];
 
                 let current_position = file.stream_position()?;
                 let end = file.seek(std::io::SeekFrom::End(0))?;
@@ -158,25 +162,90 @@ impl Cartridge {
             Err(CartridgeError::UnsupportedFile)
         }
     }
+
+    pub fn empty() -> Self {
+        Self {
+            header: INesHeader::empty(),
+            prg_rom: Vec::new(),
+            chr_rom: Vec::new(),
+            prg_ram: Vec::new(),
+        }
+    }
 }
 
 impl Bus for Cartridge {
     fn read(&self, address: u16) -> u8 {
         match address {
-            0x0000..0x2000 => self.chr_rom[address as usize],
+            0x0000..0x2000 => todo!(), // ppu
             0x2000..0x6000 => unreachable!(),
-            0x6000..0x8000 => self.prg_ram[address as usize],
-            0x8000.. => self.prg_rom[address as usize],
+            0x6000..0x8000 => self.prg_ram[address as usize - 0x6000],
+
+            0x8000.. => {
+                // TODO: eventually to be handled by mapper
+                // let address = if self.header.chr_rom_size == 1 {
+                //     // 16k rom only 0x8000-0xbff0 are valid
+                //     address & 0xbff0 & 0x7ff0
+                // } else {
+                //     address & 0x7ff0
+                // };
+                self.prg_rom[address as usize - 0x8000]
+            }
         }
     }
 
     fn write(&mut self, address: u16, data: u8) {
         match address {
-            0x0000..0x2000 => self.chr_rom[address as usize] = data,
+            0x0000..0x2000 => todo!(), // ppu
             0x2000..0x6000 => unreachable!(),
-            0x6000..0x8000 => self.prg_ram[address as usize] = data,
-            0x8000.. => self.prg_rom[address as usize] = data,
+            0x6000..0x8000 => self.prg_ram[address as usize - 0x6000] = data,
+            0x8000.. => {
+                // TODO: eventually to be handled by mapper
+                // let address = if self.header.chr_rom_size == 1 {
+                //     // 16k rom only 0x8000-0xbff0 are valid
+                //     address & 0xbff0 & 0x7ff0
+                // } else {
+                //     address & 0x7ff0
+                // };
+                self.prg_rom[address as usize - 0x8000] = data;
+            }
         }
+    }
+}
+
+#[cfg(test)]
+pub struct TestCartridge {
+    cartridge: Cartridge,
+}
+
+#[cfg(test)]
+impl TestCartridge {
+    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, CartridgeError> {
+        let cartridge = Cartridge::from_file(file_path)?;
+        Ok(Self { cartridge })
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            cartridge: Cartridge::empty(),
+        }
+    }
+
+    pub fn set_prg_rom(&mut self, new_rom: Vec<u8>) {
+        self.cartridge.prg_rom = new_rom;
+    }
+    pub fn get_prg_rom(&self) -> Vec<u8> {
+        self.cartridge.prg_rom.clone()
+    }
+}
+
+#[cfg(test)]
+impl Bus for TestCartridge {
+    fn read(&self, address: u16) -> u8 {
+        self.cartridge.read(address)
+    }
+
+    fn write(&mut self, address: u16, data: u8) {
+        self.cartridge.write(address, data);
     }
 }
 
