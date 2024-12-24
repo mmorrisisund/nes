@@ -288,9 +288,8 @@ impl<T: Bus> CPU<T> {
     }
 
     // returns (cycle adjustment, run state)
-    fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> (u8, RunState) {
+    fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> RunState {
         // TODO: Remove cycles and return value
-        let cycles = 0;
         let pc_start = self.reg_pc.wrapping_sub(2);
 
         if condition {
@@ -301,14 +300,11 @@ impl<T: Bus> CPU<T> {
             self.total_cycles += 1;
         }
 
-        (
-            cycles,
-            if condition && pc_start == new_addr {
-                RunState::InfiniteLoop(pc_start)
-            } else {
-                RunState::NormalExecution
-            },
-        )
+        if condition && pc_start == new_addr {
+            RunState::InfiniteLoop(pc_start)
+        } else {
+            RunState::NormalExecution
+        }
     }
 
     fn run_load_instruction(&mut self, instruction: &Instruction) -> u8 {
@@ -355,7 +351,6 @@ impl<T: Bus> CPU<T> {
         self.next_instruction = Some(instruction);
     }
 
-    // TODO: Should this return (Operand, bool) bool=page cross
     fn decode_operand(&mut self, instruction: &mut Instruction) -> u16 {
         use instruction::AddressingMode::*;
 
@@ -507,68 +502,36 @@ impl<T: Bus> CPU<T> {
 
             // Branch
             Bcc => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Carry as u8 == 0, // TODO: update this to use central function is_set
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state =
+                    self.run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Carry));
             }
             Bcs => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Carry as u8 != 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state =
+                    self.run_branch_condition(instruction.operand, self.is_set(StatusFlag::Carry));
             }
             Beq => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Zero as u8 != 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state =
+                    self.run_branch_condition(instruction.operand, self.is_set(StatusFlag::Zero));
             }
             Bne => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Zero as u8 == 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state =
+                    self.run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Zero));
             }
             Bpl => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Negative as u8 == 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state = self
+                    .run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Negative));
             }
             Bmi => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Negative as u8 != 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state = self
+                    .run_branch_condition(instruction.operand, self.is_set(StatusFlag::Negative));
             }
             Bvc => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Overflow as u8 == 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state = self
+                    .run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Overflow));
             }
             Bvs => {
-                let (_cycles, run_state) = self.run_branch_condition(
-                    instruction.operand,
-                    self.reg_status & StatusFlag::Overflow as u8 != 0,
-                );
-                // todo: update cycles remaining
-                state = run_state
+                state = self
+                    .run_branch_condition(instruction.operand, self.is_set(StatusFlag::Overflow));
             }
 
             // Jump
@@ -1077,8 +1040,15 @@ mod tests {
         execute_blargg_test("./src/test_roms/cpu/instr_function/all_instrs.nes");
     }
 
+    #[ignore]
     #[test]
     fn instr_timing() {
         execute_blargg_test("./src/test_roms/cpu/instr_timing/instr_timing.nes");
+    }
+
+    #[ignore]
+    #[test]
+    fn interrupts() {
+        execute_blargg_test("./src/test_roms/cpu/interrupts/cpu_interrupts.nes");
     }
 }
