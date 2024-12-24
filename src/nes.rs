@@ -1,21 +1,30 @@
 use std::path::Path;
 
 use crate::{
+    apu::APU,
     cartridge::{Cartridge, CartridgeError},
-    common::Bus,
+    common::{
+        bus::Bus,
+        interconnect::{InterruptSignaler, SignalProvider},
+    },
     cpu::{RunState, CPU},
+    ppu::PPU,
 };
 
 struct MainBus {
-    cartridge: Cartridge,
     ram: [u8; 0x800],
+    apu: APU,
+    ppu: PPU,
+    cartridge: Cartridge,
 }
 
 impl MainBus {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
-            cartridge,
             ram: [0; 0x800],
+            apu: APU {},
+            ppu: PPU {},
+            cartridge,
         }
     }
 }
@@ -39,6 +48,24 @@ impl Bus for MainBus {
             0x4018..0x4020 => {}                                           // unused
             0x4020.. => self.cartridge.write(address, data),               // cartridge
         }
+    }
+}
+
+impl SignalProvider for MainBus {
+    fn nmi_requested(&self) -> bool {
+        self.ppu.interrupt_status()
+    }
+
+    fn clear_nmi(&mut self) {
+        self.ppu.clear_interrupt();
+    }
+
+    fn irq_requested(&self) -> bool {
+        self.apu.interrupt_status()
+    }
+
+    fn clear_irq(&mut self) {
+        self.apu.clear_interrupt();
     }
 }
 

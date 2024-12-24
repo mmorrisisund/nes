@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
 
-use crate::common::Bus;
+use crate::common::bus::Bus;
 pub use error::CartridgeError;
 
 #[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
@@ -183,12 +183,13 @@ impl Bus for Cartridge {
             0x8000.. => {
                 // TODO: eventually to be handled by mapper
                 // let address = if self.header.chr_rom_size == 1 {
-                //     // 16k rom only 0x8000-0xbff0 are valid
-                //     address & 0xbff0 & 0x7ff0
+                //     // 16k rom only 0x8000-0xbfff are valid
+                //     address & 0xbfff & 0x7fff
                 // } else {
-                //     address & 0x7ff0
+                //     address & 0x7fff
                 // };
-                self.prg_rom[address as usize - 0x8000]
+                // self.prg_rom[address as usize - 0x8000]
+                self.prg_rom[address as usize & 0xbfff & 0x7fff]
             }
         }
     }
@@ -201,12 +202,13 @@ impl Bus for Cartridge {
             0x8000.. => {
                 // TODO: eventually to be handled by mapper
                 // let address = if self.header.chr_rom_size == 1 {
-                //     // 16k rom only 0x8000-0xbff0 are valid
-                //     address & 0xbff0 & 0x7ff0
+                //     // 16k rom only 0x8000-0xbfff are valid
+                //     address & 0xbfff & 0x7fff
                 // } else {
-                //     address & 0x7ff0
+                //     address & 0x7fff
                 // };
-                self.prg_rom[address as usize - 0x8000] = data;
+                // self.prg_rom[address as usize - 0x8000] = data;
+                self.prg_rom[address as usize & 0xbfff & 0x7fff] = data;
             }
         }
     }

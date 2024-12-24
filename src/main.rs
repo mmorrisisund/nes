@@ -1,20 +1,27 @@
+pub mod apu;
 pub mod cartridge;
 pub mod common;
 pub mod cpu;
 pub mod nes;
+pub mod ppu;
 
-// use nes::Nes;
+use cpu::RunState;
+use nes::Nes;
 
 fn main() {
-    // let mut nes = Nes::new("./src/test_roms/cpu/instr_timing/instr_timing.nes").unwrap();
+    let mut nes = Nes::new("./src/test_roms/cpu/branch_timing/1.Branch_Basics.nes").unwrap();
 
-    // nes.reset();
+    nes.reset();
 
-    // nes.cycle_until_infinite();
+    let mut state = RunState::NormalExecution;
+    loop {
+        if let RunState::NormalExecution = state {
+            println!("{}", nes.cpu_trace());
+        }
+        state = nes.cycle_tick();
 
-    // nes.cycle_until_mem_neq(0x6000, 0x80);
-    // let result = nes.bus_read(0x6000);
-
-    // println!("done: {result:04X}");
-    // println!("{}", nes.cpu_trace());
+        if let RunState::InfiniteLoop(_) = state {
+            panic!("done?");
+        }
+    }
 }

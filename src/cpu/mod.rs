@@ -2,9 +2,11 @@ pub mod instruction;
 
 use instruction::{Instruction, OpCode};
 
-use super::common::Bus;
+use crate::common::interconnect::SignalProvider;
 
-// const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
+use super::common::bus::Bus;
+
+const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;
 const IRQ_VECTOR_ADDRESS: u16 = 0xfffe;
 
@@ -16,6 +18,7 @@ pub enum RunState {
     Waiting,
     NormalExecution,
     InfiniteLoop(u16),
+    StartInterrupt,
 }
 
 // NV_BDIZC
@@ -24,7 +27,7 @@ enum StatusFlag {
     Zero = 1 << 1,
     InterruptDisable = 1 << 2,
     DecimalMode = 1 << 3,
-    _BreakCmd = 1 << 4,
+    BreakCmd = 1 << 4,
     Overflow = 1 << 6,
     Negative = 1 << 7,
 }
@@ -33,13 +36,16 @@ fn on_same_page(addr1: u16, addr2: u16) -> bool {
     (addr1 & 0xff00) == (addr2 & 0xff00)
 }
 
-pub struct CPU<T: Bus> {
+pub struct CPU<T: Bus + SignalProvider> {
     reg_pc: u16,
     reg_sp: u8,
     reg_a: u8,
     reg_x: u8,
     reg_y: u8,
     reg_status: u8,
+
+    nmi_requested: bool,
+    irq_requested: bool,
 
     next_instruction: Option<Instruction>,
     cycles_left: u8,
@@ -49,7 +55,7 @@ pub struct CPU<T: Bus> {
 }
 
 // Public
-impl<T: Bus> CPU<T> {
+impl<T: Bus + SignalProvider> CPU<T> {
     pub fn new(bus: T) -> Self {
         Self {
             reg_pc: 0,
@@ -58,6 +64,9 @@ impl<T: Bus> CPU<T> {
             reg_x: 0,
             reg_y: 0,
             reg_status: 0,
+
+            nmi_requested: false,
+            irq_requested: false,
 
             next_instruction: None,
             cycles_left: 0,
@@ -74,6 +83,10 @@ impl<T: Bus> CPU<T> {
         self.reg_pc = self.bus.read_u16(RESET_VECTOR_ADDRESS);
         self.reg_sp = STACK_START;
         self.reg_status = StatusFlag::InterruptDisable as u8 | 1 << 5; // unused, but always 1
+
+        self.nmi_requested = false;
+        self.irq_requested = false;
+
         self.total_cycles = 7;
 
         self.fetch_next_instruction();
@@ -83,23 +96,24 @@ impl<T: Bus> CPU<T> {
         self.total_cycles += 1;
 
         if self.cycles_left == 0 && self.next_instruction.is_none() {
-            // if interrupt check
+            if self.nmi_requested
+                || (self.irq_requested && !self.is_set(StatusFlag::InterruptDisable))
+            {
+                self.execute_interrupt(false);
+                RunState::StartInterrupt
+            } else {
+                self.check_for_interrupt_request();
 
-            // else
-            // - check for irq change request
+                self.fetch_next_instruction();
+                self.cycles_left -= 1;
 
-            // - fetch
-            self.fetch_next_instruction();
-            self.cycles_left -= 1;
-
-            RunState::Waiting
+                RunState::Waiting
+            }
         } else if self.cycles_left == 1 && self.next_instruction.is_some() {
-            // TODO: can't this just be done in execute?
-            let instruction = self.next_instruction.take().unwrap();
-            let state = self.execute_instruction(&instruction);
-            // adjust cycle time
+            let state = self.execute_instruction();
+
             self.cycles_left -= 1;
-            // return state from execution
+
             state
         } else {
             self.cycles_left -= 1;
@@ -234,7 +248,7 @@ impl<T: Bus> CPU<T> {
 }
 
 // Private
-impl<T: Bus> CPU<T> {
+impl<T: Bus + SignalProvider> CPU<T> {
     fn set_flag(&mut self, flag: StatusFlag) {
         self.reg_status |= flag as u8;
     }
@@ -321,6 +335,48 @@ impl<T: Bus> CPU<T> {
     fn pop_stack(&mut self) -> u8 {
         self.reg_sp = self.reg_sp.wrapping_add(1);
         self.bus.read(STACK_PAGE | self.reg_sp as u16)
+    }
+
+    fn execute_interrupt(&mut self, is_brk: bool) {
+        let pc = self.reg_pc;
+        let lo = pc as u8;
+        let hi = (pc >> 8) as u8;
+
+        self.push_stack(hi);
+        self.push_stack(lo);
+
+        let interrupt_vector = if self.nmi_requested {
+            self.nmi_requested = false;
+            NMI_VECTOR_ADDRESS
+        } else {
+            self.irq_requested = false;
+            IRQ_VECTOR_ADDRESS
+        };
+
+        let sr = self.reg_status
+            | if is_brk {
+                StatusFlag::BreakCmd as u8
+            } else {
+                debug_assert!(!self.is_set(StatusFlag::BreakCmd));
+                0x00 // We technically want to send this flag cleared, but it should never be set in the cpu
+            };
+        self.push_stack(sr);
+
+        self.set_status(StatusFlag::InterruptDisable, true);
+
+        self.reg_pc = self.bus.read_u16(interrupt_vector);
+    }
+
+    fn check_for_interrupt_request(&mut self) {
+        if self.bus.irq_requested() {
+            self.irq_requested = true;
+            self.bus.clear_irq();
+        }
+
+        if self.bus.nmi_requested() {
+            self.nmi_requested = true;
+            self.bus.clear_nmi();
+        }
     }
 
     fn fetch_next_instruction(&mut self) {
@@ -422,19 +478,20 @@ impl<T: Bus> CPU<T> {
         }
     }
 
-    fn execute_instruction(&mut self, instruction: &Instruction) -> RunState {
+    fn execute_instruction(&mut self) -> RunState {
         use instruction::OpCode::*;
 
         let mut state = RunState::NormalExecution;
+        let instruction = self.next_instruction.take().unwrap();
 
-        // match opcode and perform action (some actions alter remaining cycle time)
+        // match opcode and perform action (some actions alter remaining cycle time, maybe)
         match instruction.op_code {
             // Access
-            Lda => self.reg_a = self.run_load_instruction(instruction),
+            Lda => self.reg_a = self.run_load_instruction(&instruction),
             Sta => self.bus.write(instruction.operand, self.reg_a),
-            Ldx => self.reg_x = self.run_load_instruction(instruction),
+            Ldx => self.reg_x = self.run_load_instruction(&instruction),
             Stx => self.bus.write(instruction.operand, self.reg_x),
-            Ldy => self.reg_y = self.run_load_instruction(instruction),
+            Ldy => self.reg_y = self.run_load_instruction(&instruction),
             Sty => self.bus.write(instruction.operand, self.reg_y),
 
             // Transfer
@@ -456,8 +513,8 @@ impl<T: Bus> CPU<T> {
             }
 
             // Arithmetic
-            Adc => self.adc(instruction),
-            Sbc => self.sbc(instruction),
+            Adc => self.adc(&instruction),
+            Sbc => self.sbc(&instruction),
             Inc => self.inc(instruction.operand),
             Dec => self.dec(instruction.operand),
             Inx => {
@@ -478,15 +535,15 @@ impl<T: Bus> CPU<T> {
             }
 
             // Shift
-            Asl => self.asl(instruction),
-            Lsr => self.lsr(instruction),
-            Rol => self.rol(instruction),
-            Ror => self.ror(instruction),
+            Asl => self.asl(&instruction),
+            Lsr => self.lsr(&instruction),
+            Rol => self.rol(&instruction),
+            Ror => self.ror(&instruction),
 
             // Bitwise
-            And => self.and(instruction),
-            Eor => self.eor(instruction),
-            Ora => self.ora(instruction),
+            And => self.and(&instruction),
+            Eor => self.eor(&instruction),
+            Ora => self.ora(&instruction),
             Bit => {
                 let data = self.bus.read(instruction.operand);
 
@@ -496,9 +553,9 @@ impl<T: Bus> CPU<T> {
             }
 
             // Compare
-            Cmp => self.run_cmp_operation(instruction, self.reg_a),
-            Cpx => self.run_cmp_operation(instruction, self.reg_x),
-            Cpy => self.run_cmp_operation(instruction, self.reg_y),
+            Cmp => self.run_cmp_operation(&instruction, self.reg_a),
+            Cpx => self.run_cmp_operation(&instruction, self.reg_x),
+            Cpy => self.run_cmp_operation(&instruction, self.reg_y),
 
             // Branch
             Bcc => {
@@ -566,19 +623,11 @@ impl<T: Bus> CPU<T> {
                 self.reg_pc = (hi << 8) | lo;
             }
             Brk => {
-                // TODO: this entire thing really needs done
                 // TODO: handle bug with nmi
                 // TODO: probably work on interrupt stuff
-                let return_addr = self.reg_pc + 2 - instruction.get_instruction_len() as u16;
-                let lo = (return_addr & 0xff) as u8;
-                let hi = (return_addr >> 8) as u8;
-                self.push_stack(hi);
-                self.push_stack(lo);
+                self.reg_pc += 1; // The BRK code always skips the next byte
 
-                self.push_stack(self.reg_status | 0x30);
-                self.set_status(StatusFlag::InterruptDisable, true);
-
-                self.reg_pc = self.bus.read_u16(IRQ_VECTOR_ADDRESS);
+                self.execute_interrupt(true);
             }
 
             // Stack
@@ -614,19 +663,19 @@ impl<T: Bus> CPU<T> {
             // Unofficial
             // TODO: will probably need to track cycles before calls and reset after
             Alr => {
-                self.and(instruction);
-                self.lsr(instruction);
+                self.and(&instruction);
+                self.lsr(&instruction);
             }
             Anc => {
-                self.and(instruction);
+                self.and(&instruction);
                 self.set_status(StatusFlag::Carry, self.is_set(StatusFlag::Negative));
             }
             Arr => {
-                self.and(instruction);
+                self.and(&instruction);
 
                 // let mut ror_ins = instruction.clone();
                 // ror_ins.operand.is_address = false;  // this might already be false based on addressing mode
-                self.ror(instruction);
+                self.ror(&instruction);
 
                 self.set_status(StatusFlag::Carry, (self.reg_a >> 6) & 1 != 0);
                 self.set_status(
@@ -650,31 +699,31 @@ impl<T: Bus> CPU<T> {
 
             Dcp => {
                 self.dec(instruction.operand);
-                self.run_cmp_operation(instruction, self.reg_a);
+                self.run_cmp_operation(&instruction, self.reg_a);
             }
             Isc => {
                 self.inc(instruction.operand);
-                self.sbc(instruction);
+                self.sbc(&instruction);
             }
             Rla => {
-                self.rol(instruction);
-                self.and(instruction);
+                self.rol(&instruction);
+                self.and(&instruction);
             }
             Rra => {
-                self.ror(instruction);
-                self.adc(instruction);
+                self.ror(&instruction);
+                self.adc(&instruction);
             }
             Slo => {
-                self.asl(instruction);
-                self.ora(instruction);
+                self.asl(&instruction);
+                self.ora(&instruction);
             }
             Sre => {
-                self.lsr(instruction);
-                self.eor(instruction);
+                self.lsr(&instruction);
+                self.eor(&instruction);
             }
 
             Atx => {
-                self.and(instruction);
+                self.and(&instruction);
                 self.reg_x = self.reg_a;
             }
             Las => {
@@ -722,7 +771,7 @@ impl<T: Bus> CPU<T> {
             }
             Xaa => {
                 self.reg_a = self.reg_x;
-                self.and(instruction);
+                self.and(&instruction);
             }
 
             Kil => {
@@ -882,13 +931,28 @@ impl<T: Bus> CPU<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cartridge::TestCartridge;
+    use crate::{
+        apu::APU, cartridge::TestCartridge, common::interconnect::InterruptSignaler, ppu::PPU,
+    };
 
     use super::*;
 
     struct TestBusRom {
-        pub cartridge: TestCartridge,
         ram: [u8; 0x800],
+        apu: APU,
+        ppu: PPU,
+        pub cartridge: TestCartridge,
+    }
+
+    impl TestBusRom {
+        pub fn new(cartridge: TestCartridge) -> Self {
+            Self {
+                ram: [0; 0x800],
+                apu: APU {},
+                ppu: PPU {},
+                cartridge,
+            }
+        }
     }
 
     impl Bus for TestBusRom {
@@ -913,8 +977,38 @@ mod tests {
         }
     }
 
+    impl SignalProvider for TestBusRom {
+        fn nmi_requested(&self) -> bool {
+            self.ppu.interrupt_status()
+        }
+
+        fn clear_nmi(&mut self) {
+            self.ppu.clear_interrupt();
+        }
+
+        fn irq_requested(&self) -> bool {
+            self.apu.interrupt_status()
+        }
+
+        fn clear_irq(&mut self) {
+            self.apu.clear_interrupt();
+        }
+    }
+
     struct TestBusBin {
         data: [u8; 0x10000],
+        apu: APU,
+        ppu: PPU,
+    }
+
+    impl TestBusBin {
+        pub fn new(data: [u8; 0x10000]) -> Self {
+            Self {
+                data,
+                apu: APU {},
+                ppu: PPU {},
+            }
+        }
     }
 
     impl Bus for TestBusBin {
@@ -928,6 +1022,24 @@ mod tests {
                 _ => {}
             }
             self.data[address as usize] = data;
+        }
+    }
+
+    impl SignalProvider for TestBusBin {
+        fn nmi_requested(&self) -> bool {
+            self.ppu.interrupt_status()
+        }
+
+        fn clear_nmi(&mut self) {
+            self.ppu.clear_interrupt();
+        }
+
+        fn irq_requested(&self) -> bool {
+            self.apu.interrupt_status()
+        }
+
+        fn clear_irq(&mut self) {
+            self.apu.clear_interrupt();
         }
     }
 
@@ -952,10 +1064,7 @@ mod tests {
 
     fn execute_blargg_test(file_path: &str) {
         let cartridge = TestCartridge::from_file(file_path).unwrap();
-        let bus = TestBusRom {
-            cartridge,
-            ram: [0; 0x800],
-        };
+        let bus = TestBusRom::new(cartridge);
         let mut cpu = CPU::new(bus);
 
         cpu.reset();
@@ -977,7 +1086,7 @@ mod tests {
         data[0xfffc] = 0x00;
         data[0xfffd] = 0x04;
 
-        let bus = TestBusBin { data };
+        let bus = TestBusBin::new(data);
         let mut cpu = CPU::new(bus);
 
         const SUCCESS_ADDRESS: u16 = 0x336d;
@@ -1013,10 +1122,7 @@ mod tests {
         cartridge.write(0xfffc, 0x00);
         cartridge.write(0xfffd, 0xc0);
 
-        let bus = TestBusRom {
-            cartridge,
-            ram: [0; 0x800],
-        };
+        let bus = TestBusRom::new(cartridge);
         let mut cpu = CPU::new(bus);
 
         // The end of this test results file was modified to return 00 instead of FF in the final checks.
