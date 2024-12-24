@@ -22,7 +22,7 @@ impl MainBus {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
             ram: [0; 0x800],
-            apu: APU {},
+            apu: APU::default(),
             ppu: PPU {},
             cartridge,
         }

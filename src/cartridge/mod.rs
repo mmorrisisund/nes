@@ -171,6 +171,17 @@ impl Cartridge {
             prg_ram: Vec::new(),
         }
     }
+
+    // TODO: Maybe make it so cartridges can be created from Vec<u8>
+    #[cfg(test)]
+    pub fn set_prg_rom(&mut self, new_rom: Vec<u8>) {
+        self.prg_rom = new_rom;
+    }
+
+    #[cfg(test)]
+    pub fn get_prg_rom(&self) -> Vec<u8> {
+        self.prg_rom.clone()
+    }
 }
 
 impl Bus for Cartridge {
@@ -189,7 +200,11 @@ impl Bus for Cartridge {
                 //     address & 0x7fff
                 // };
                 // self.prg_rom[address as usize - 0x8000]
-                self.prg_rom[address as usize & 0xbfff & 0x7fff]
+                if self.header.mapper == 0 {
+                    self.prg_rom[address as usize - 0x8000]
+                } else {
+                    self.prg_rom[address as usize & 0xbfff & 0x7fff]
+                }
             }
         }
     }
@@ -211,43 +226,6 @@ impl Bus for Cartridge {
                 self.prg_rom[address as usize & 0xbfff & 0x7fff] = data;
             }
         }
-    }
-}
-
-#[cfg(test)]
-pub struct TestCartridge {
-    cartridge: Cartridge,
-}
-
-#[cfg(test)]
-impl TestCartridge {
-    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, CartridgeError> {
-        let cartridge = Cartridge::from_file(file_path)?;
-        Ok(Self { cartridge })
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            cartridge: Cartridge::empty(),
-        }
-    }
-
-    pub fn set_prg_rom(&mut self, new_rom: Vec<u8>) {
-        self.cartridge.prg_rom = new_rom;
-    }
-    pub fn get_prg_rom(&self) -> Vec<u8> {
-        self.cartridge.prg_rom.clone()
-    }
-}
-
-#[cfg(test)]
-impl Bus for TestCartridge {
-    fn read(&self, address: u16) -> u8 {
-        self.cartridge.read(address)
-    }
-
-    fn write(&mut self, address: u16, data: u8) {
-        self.cartridge.write(address, data);
     }
 }
 

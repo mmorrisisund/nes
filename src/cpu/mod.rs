@@ -131,6 +131,7 @@ impl<T: Bus + SignalProvider> CPU<T> {
     }
 
     pub fn trace(&mut self) -> String {
+        // FIXME: Can trace not affect the state of the cpu???
         if self.next_instruction.is_none() {
             self.fetch_next_instruction();
         }
@@ -242,6 +243,7 @@ impl<T: Bus + SignalProvider> CPU<T> {
         format!("{asm:47} {regs}")
     }
 
+    #[cfg(test)]
     pub fn bus(&self) -> &T {
         &self.bus
     }
@@ -932,68 +934,16 @@ impl<T: Bus + SignalProvider> CPU<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        apu::APU, cartridge::TestCartridge, common::interconnect::InterruptSignaler, ppu::PPU,
+        apu::APU,
+        cartridge::Cartridge,
+        common::{
+            interconnect::InterruptSignaler,
+            test_helpers::{execute_blargg_test, TestBusRom},
+        },
+        ppu::PPU,
     };
 
     use super::*;
-
-    struct TestBusRom {
-        ram: [u8; 0x800],
-        apu: APU,
-        ppu: PPU,
-        pub cartridge: TestCartridge,
-    }
-
-    impl TestBusRom {
-        pub fn new(cartridge: TestCartridge) -> Self {
-            Self {
-                ram: [0; 0x800],
-                apu: APU {},
-                ppu: PPU {},
-                cartridge,
-            }
-        }
-    }
-
-    impl Bus for TestBusRom {
-        fn read(&self, address: u16) -> u8 {
-            match address {
-                0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
-                0x2000..0x4000 => 0,                                    // ppu
-                0x4000..0x4018 => 0,                                    // apu
-                0x4018..0x4020 => 0,                                    // unused
-                0x4020.. => self.cartridge.read(address),               // cartridge
-            }
-        }
-
-        fn write(&mut self, address: u16, data: u8) {
-            match address {
-                0x0000..0x2000 => self.ram[(address & 0x7ff) as usize] = data, // ram
-                0x2000..0x4000 => {}                                           // ppu
-                0x4000..0x4018 => {}                                           // apu
-                0x4018..0x4020 => {}                                           // unused
-                0x4020.. => self.cartridge.write(address, data),               // cartridge
-            }
-        }
-    }
-
-    impl SignalProvider for TestBusRom {
-        fn nmi_requested(&self) -> bool {
-            self.ppu.interrupt_status()
-        }
-
-        fn clear_nmi(&mut self) {
-            self.ppu.clear_interrupt();
-        }
-
-        fn irq_requested(&self) -> bool {
-            self.apu.interrupt_status()
-        }
-
-        fn clear_irq(&mut self) {
-            self.apu.clear_interrupt();
-        }
-    }
 
     struct TestBusBin {
         data: [u8; 0x10000],
@@ -1005,7 +955,7 @@ mod tests {
         pub fn new(data: [u8; 0x10000]) -> Self {
             Self {
                 data,
-                apu: APU {},
+                apu: APU::default(),
                 ppu: PPU {},
             }
         }
@@ -1043,39 +993,6 @@ mod tests {
         }
     }
 
-    fn cycle_until_infinite(cpu: &mut CPU<TestBusRom>) {
-        loop {
-            let state = cpu.cycle_tick();
-            if let RunState::InfiniteLoop(_) = state {
-                return;
-            }
-        }
-    }
-
-    fn cycle_until_mem_neq(cpu: &mut CPU<TestBusRom>, address: u16, value: u8) {
-        loop {
-            cpu.cycle_tick();
-
-            if cpu.bus().read(address) != value {
-                return;
-            }
-        }
-    }
-
-    fn execute_blargg_test(file_path: &str) {
-        let cartridge = TestCartridge::from_file(file_path).unwrap();
-        let bus = TestBusRom::new(cartridge);
-        let mut cpu = CPU::new(bus);
-
-        cpu.reset();
-
-        cycle_until_infinite(&mut cpu);
-        cycle_until_mem_neq(&mut cpu, 0x6000, 0x80);
-
-        let result = cpu.bus.read(0x6000);
-        assert_eq!(result, 0, "\n\ntrace: {}\n", cpu.trace());
-    }
-
     #[test]
     fn functionality() {
         let file_data = include_bytes!("../test_roms/cpu/functional/6502_functional_test.bin");
@@ -1111,7 +1028,7 @@ mod tests {
     #[test]
     fn nestest() {
         let mut cartridge =
-            TestCartridge::from_file("./src/test_roms/nes/nestest/nestest.nes").unwrap();
+            Cartridge::from_file("./src/test_roms/nes/nestest/nestest.nes").unwrap();
 
         // rom needs program code mirrored, default reset vector is wrong
         let mut rom = cartridge.get_prg_rom();
@@ -1120,7 +1037,7 @@ mod tests {
 
         cartridge.set_prg_rom(new_rom);
         cartridge.write(0xfffc, 0x00);
-        cartridge.write(0xfffd, 0xc0);
+        cartridge.write(0xfffd, 0x80);
 
         let bus = TestBusRom::new(cartridge);
         let mut cpu = CPU::new(bus);
