@@ -83,8 +83,8 @@ impl<T> LengthCountedChannel<T> {
 
 #[derive(Debug, Default)]
 pub struct SquarePulseChannel {
-    pub duty: u8, // width
-    pub halt: bool,
-    pub constant_volume: bool,
-    pub volume: u8,
+    // pub duty: u8, // width
+    // pub halt: bool,
+    // pub constant_volume: bool,
+    // pub volume: u8,
 }
