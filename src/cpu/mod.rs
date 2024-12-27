@@ -57,13 +57,13 @@ pub struct CPU<T: Bus + SignalProvider> {
 // Public
 impl<T: Bus + SignalProvider> CPU<T> {
     pub fn new(bus: T) -> Self {
-        Self {
-            reg_pc: 0,
-            reg_sp: 0,
+        let mut cpu = Self {
             reg_a: 0,
             reg_x: 0,
             reg_y: 0,
-            reg_status: 0,
+            reg_pc: 0,
+            reg_sp: STACK_START,
+            reg_status: StatusFlag::InterruptDisable as u8 | 1 << 5, // unused, but always
 
             nmi_requested: false,
             irq_requested: false,
@@ -73,7 +73,9 @@ impl<T: Bus + SignalProvider> CPU<T> {
             total_cycles: 0,
 
             bus,
-        }
+        };
+        cpu.reg_pc = cpu.bus.read_u16(RESET_VECTOR_ADDRESS);
+        cpu
     }
 
     pub fn reset(&mut self) {

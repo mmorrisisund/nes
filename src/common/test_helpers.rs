@@ -27,8 +27,7 @@ impl TestNes {
 
     fn cycle_until_infinite(&mut self) -> u64 {
         // reminder: don't trace, alters apu register on read
-        // i've removed the read piece in trace
-        // !("{}", self.nes.cpu_trace());
+        // println!("{}", self.nes.cpu_trace());
         let mut total_cycles = 0;
         loop {
             total_cycles += 1;
@@ -132,11 +131,13 @@ fn create_test_nes(file_path: &str) -> TestNes {
 pub fn execute_blargg_test(file_path: &str) {
     let mut nes = create_test_nes(file_path);
 
-    nes.reset();
+    // nes.reset();
 
+    nes.cycle_until_infinite();
     nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
 
     while nes.cpu_bus().read(STATUS_ADDR) == RESET_NEEDED {
+        // println!("reset performed");
         nes.reset();
 
         nes.cycle_until_infinite();
