@@ -1,4 +1,6 @@
 pub trait Bus {
+    fn reset(&mut self);
+
     fn read(&self, address: u16) -> u8;
     fn write(&mut self, address: u16, data: u8);
 
@@ -16,4 +18,25 @@ pub trait Bus {
         self.write(address, lo);
         self.write(address + 1, hi);
     }
+}
+
+// TODO: Add visibility modifiers?
+macro_rules! mem_mapped_registers {
+    (enum $name:ident { $($field:ident = $field_val:expr,)*}) => {
+        #[derive(Debug)]
+        enum $name {
+            $($field = $field_val,)*
+        }
+
+        impl TryFrom<u16> for $name {
+            type Error = ();
+
+            fn try_from(value: u16) -> Result<Self, Self::Error> {
+                match value {
+                    $(x if x == $name::$field as u16 => Ok($name::$field),)*
+                    _ => Err(()),
+                }
+            }
+        }
+    };
 }

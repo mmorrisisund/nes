@@ -185,6 +185,10 @@ impl Cartridge {
 }
 
 impl Bus for Cartridge {
+    fn reset(&mut self) {
+        todo!()
+    }
+
     fn read(&self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => todo!(), // ppu

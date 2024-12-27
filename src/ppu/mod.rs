@@ -7,5 +7,9 @@ impl InterruptSignaler for PPU {
         false
     }
 
+    fn interrupt_status_changed(&self) -> bool {
+        todo!()
+    }
+
     fn clear_interrupt(&mut self) {}
 }

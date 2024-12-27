@@ -5,45 +5,56 @@ use crate::{
         bus::Bus,
         interconnect::{InterruptSignaler, SignalProvider},
     },
-    cpu::{RunState, CPU},
+    cpu::RunState,
+    nes::{MainBus, Nes},
     ppu::PPU,
 };
 
+const STATUS_ADDR: u16 = 0x6000;
+const TEXT_ADDR: u16 = 0x6004;
+const TEST_RUNNING: u8 = 0x80;
+const RESET_NEEDED: u8 = 0x81;
+
 struct TestNes {
-    cpu: CPU<TestBusRom>,
+    nes: Nes,
+    // cpu: CPU<TestBusRom>,
 }
 
 impl TestNes {
     fn reset(&mut self) {
-        self.cpu.reset();
+        self.nes.reset();
     }
 
-    fn cycle_until_infinite(&mut self) {
+    fn cycle_until_infinite(&mut self) -> u64 {
+        // reminder: don't trace, alters apu register on read
+        // i've removed the read piece in trace
+        // !("{}", self.nes.cpu_trace());
+        let mut total_cycles = 0;
         loop {
-            // println!("{}", self.cpu.trace());
-            let state = self.cpu.cycle_tick();
+            total_cycles += 1;
+            let state = self.nes.cycle_tick();
+            if let RunState::NormalExecution = state {
+                // println!("{}", self.nes.cpu_trace());
+            }
             if let RunState::InfiniteLoop(_) = state {
-                return;
+                return total_cycles;
             }
         }
     }
 
     fn cycle_until_mem_neq(&mut self, address: u16, value: u8) {
+        // reminder: don't trace, alters apu register on read
         loop {
-            self.cpu.cycle_tick();
+            self.nes.cycle_tick();
 
-            if self.cpu.bus().read(address) != value {
+            if self.nes.bus().read(address) != value {
                 return;
             }
         }
     }
 
-    fn cpu_bus(&self) -> &TestBusRom {
-        self.cpu.bus()
-    }
-
-    fn cpu_trace(&mut self) -> String {
-        self.cpu.trace()
+    fn cpu_bus(&self) -> &MainBus {
+        self.nes.bus()
     }
 }
 
@@ -66,6 +77,10 @@ impl TestBusRom {
 }
 
 impl Bus for TestBusRom {
+    fn reset(&mut self) {
+        self.apu.reset();
+    }
+
     fn read(&self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
@@ -96,21 +111,22 @@ impl SignalProvider for TestBusRom {
         self.ppu.clear_interrupt();
     }
 
-    fn irq_requested(&self) -> bool {
+    fn interrupt_status(&self) -> bool {
         self.apu.interrupt_status()
     }
 
-    fn clear_irq(&mut self) {
+    fn interrupt_status_changed(&self) -> bool {
+        self.apu.interrupt_status_changed()
+    }
+
+    fn clear_interrupt(&mut self) {
         self.apu.clear_interrupt();
     }
 }
 
 fn create_test_nes(file_path: &str) -> TestNes {
-    let cartridge = Cartridge::from_file(file_path).unwrap();
-    let bus = TestBusRom::new(cartridge);
-    let cpu = CPU::new(bus);
-
-    TestNes { cpu }
+    let nes = Nes::new(file_path).unwrap();
+    TestNes { nes }
 }
 
 pub fn execute_blargg_test(file_path: &str) {
@@ -118,9 +134,35 @@ pub fn execute_blargg_test(file_path: &str) {
 
     nes.reset();
 
-    nes.cycle_until_infinite();
-    nes.cycle_until_mem_neq(0x6000, 0x80);
+    nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
 
-    let result = nes.cpu_bus().read(0x6000);
-    assert_eq!(result, 0, "\n\ntrace: {}\n", nes.cpu_trace());
+    while nes.cpu_bus().read(STATUS_ADDR) == RESET_NEEDED {
+        nes.reset();
+
+        nes.cycle_until_infinite();
+        nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
+    }
+
+    let result = nes.cpu_bus().read(STATUS_ADDR);
+    let text = get_text_output(&nes);
+    assert_eq!(result, 0, "\n{}", text);
+}
+
+fn get_text_output(nes: &TestNes) -> String {
+    let mut addr = TEXT_ADDR;
+    let mut chars = Vec::new();
+    let mut c = nes.cpu_bus().read(addr);
+
+    while c != 0 {
+        chars.push(c);
+
+        addr += 1;
+        c = nes.cpu_bus().read(addr)
+    }
+
+    if !chars.is_empty() {
+        String::from_utf8_lossy(&chars).to_string()
+    } else {
+        String::new()
+    }
 }

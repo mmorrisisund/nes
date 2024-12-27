@@ -1,0 +1,90 @@
+#[derive(Debug, Default)]
+pub struct LengthCounter {
+    counter: u8,
+    enabled: bool,
+    halt: bool,
+}
+
+impl LengthCounter {
+    pub fn new() -> Self {
+        Self {
+            counter: 0,
+            enabled: false,
+            halt: false,
+        }
+    }
+
+    pub fn load_length_counter(&mut self, index: u8) {
+        // TODO: read this from specific table
+        if self.enabled {
+            self.counter = 4;
+        }
+    }
+
+    pub fn counter(&self) -> u8 {
+        self.counter
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+
+        if !self.enabled {
+            self.counter = 0;
+        }
+    }
+
+    pub fn set_halt(&mut self, halt: bool) {
+        self.halt = halt
+    }
+
+    pub fn decrement(&mut self) {
+        self.counter = if self.enabled {
+            if !self.halt {
+                self.counter.saturating_sub(1)
+            } else {
+                self.counter
+            }
+        } else {
+            0
+        };
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct LengthCountedChannel<T> {
+    counter: LengthCounter,
+    channel: T,
+}
+
+impl<T> LengthCountedChannel<T> {
+    pub fn new(channel: T) -> Self {
+        Self {
+            counter: LengthCounter::new(),
+            channel,
+        }
+    }
+
+    pub fn length_counter(&self) -> &LengthCounter {
+        &self.counter
+    }
+
+    pub fn length_counter_mut(&mut self) -> &mut LengthCounter {
+        &mut self.counter
+    }
+
+    pub fn channel(&self) -> &T {
+        &self.channel
+    }
+
+    pub fn channel_mut(&mut self) -> &mut T {
+        &mut self.channel
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SquarePulseChannel {
+    pub duty: u8, // width
+    pub halt: bool,
+    pub constant_volume: bool,
+    pub volume: u8,
+}

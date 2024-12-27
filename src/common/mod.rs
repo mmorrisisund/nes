@@ -1,3 +1,4 @@
+#[macro_use]
 pub mod bus;
 pub mod interconnect;
 
