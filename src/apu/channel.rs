@@ -1,3 +1,12 @@
+// |  0   1   2   3   4   5   6   7    8   9   A   B   C   D   E   F
+// -----+----------------------------------------------------------------
+// 00-0F  10,254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
+// 10-1F  12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
+const LENGTH_TABLE: [u8; 0x20] = [
+    10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
+    192, 24, 72, 26, 16, 28, 32, 30,
+];
+
 #[derive(Debug, Default)]
 pub struct LengthCounter {
     counter: u8,
@@ -15,9 +24,10 @@ impl LengthCounter {
     }
 
     pub fn load_length_counter(&mut self, index: u8) {
-        // TODO: read this from specific table
+        debug_assert!(index <= 0x1f);
+
         if self.enabled {
-            self.counter = 4;
+            self.counter = LENGTH_TABLE[index as usize];
         }
     }
 
@@ -82,9 +92,10 @@ impl<T> LengthCountedChannel<T> {
 }
 
 #[derive(Debug, Default)]
-pub struct SquarePulseChannel {
-    // pub duty: u8, // width
-    // pub halt: bool,
-    // pub constant_volume: bool,
-    // pub volume: u8,
-}
+pub struct SquarePulseChannel {}
+
+#[derive(Debug, Default)]
+pub struct TriangleChannel {}
+
+#[derive(Debug, Default)]
+pub struct NoiseChannel {}

@@ -1,8 +1,8 @@
 mod channel;
 
-use std::cell::Cell;
+use std::{cell::Cell, cmp::Ordering};
 
-use channel::{LengthCountedChannel, SquarePulseChannel};
+use channel::{LengthCountedChannel, NoiseChannel, SquarePulseChannel, TriangleChannel};
 
 use crate::common::{bus::Bus, interconnect::InterruptSignaler};
 
@@ -10,50 +10,51 @@ use crate::common::{bus::Bus, interconnect::InterruptSignaler};
 pub struct APU {
     pulse1: LengthCountedChannel<SquarePulseChannel>,
     pulse2: LengthCountedChannel<SquarePulseChannel>,
-    triangle: LengthCountedChannel<SquarePulseChannel>,
-    noise: LengthCountedChannel<SquarePulseChannel>,
+    triangle: LengthCountedChannel<TriangleChannel>,
+    noise: LengthCountedChannel<NoiseChannel>,
 
-    cycle: u16,
+    frame_cycle: u16,
+    frame_cycle_reset_delay: i8,
 
     frame_interrupt_flag: Cell<bool>, // Status read clears interrupt.  So interior mutability needed
     frame_interrupt_flag_changed: Cell<bool>, // Status read clears interrupt.  So interior mutability needed
 
     interrupt_disabled: bool,
     sequencer_mode: FrameCounterSequencerMode,
-
-    start_delay: u8, // delay after power on/reset
+    pending_sequencer_mode: FrameCounterSequencerMode,
 }
 
 impl APU {
     pub fn new() -> Self {
         Self {
-            cycle: 7, // cpu has 7 cycle delay at start
-            start_delay: 0,
-            frame_interrupt_flag: Cell::new(false),
-            frame_interrupt_flag_changed: Cell::new(false),
+            frame_cycle: 7, // cpu has 7 cycle delay at start
+            frame_cycle_reset_delay: -1,
             ..Default::default()
         }
     }
 
     pub fn cycle_tick(&mut self) {
-        self.cycle += 1;
+        self.frame_cycle += 1;
 
-        if self.start_delay > 0 {
-            // TODO: i don't know if this is necessary or needed, or even doing anything at all
-            self.start_delay -= 1;
-            if self.start_delay == 0 {
-                self.frame_interrupt_flag.set(true);
-                self.frame_interrupt_flag_changed.set(true);
+        match self.frame_cycle_reset_delay.cmp(&0) {
+            Ordering::Less => {}
+            Ordering::Equal => {
+                self.frame_cycle_reset_delay -= 1;
+
+                self.frame_cycle = 0;
+                self.sequencer_mode = self.pending_sequencer_mode;
+
+                if let FrameCounterSequencerMode::FiveStep = self.sequencer_mode {
+                    self.generate_quarter_frame_clock();
+                    self.generate_half_frame_clock();
+                }
             }
-            return;
+            Ordering::Greater => self.frame_cycle_reset_delay -= 1,
         }
 
-        match self.cycle {
+        match self.frame_cycle {
             14913 => {
-                self.pulse1.length_counter_mut().decrement();
-                self.pulse2.length_counter_mut().decrement();
-                self.triangle.length_counter_mut().decrement();
-                self.noise.length_counter_mut().decrement();
+                self.generate_half_frame_clock();
             }
             29828 => {
                 if self.sequencer_mode == FrameCounterSequencerMode::FourStep {
@@ -62,10 +63,7 @@ impl APU {
             }
             29829 => {
                 if self.sequencer_mode == FrameCounterSequencerMode::FourStep {
-                    self.pulse1.length_counter_mut().decrement();
-                    self.pulse2.length_counter_mut().decrement();
-                    self.triangle.length_counter_mut().decrement();
-                    self.noise.length_counter_mut().decrement();
+                    self.generate_half_frame_clock();
 
                     self.update_interrupt();
                 }
@@ -73,19 +71,15 @@ impl APU {
             29830 if self.sequencer_mode == FrameCounterSequencerMode::FourStep => {
                 self.update_interrupt();
 
-                self.cycle = 0;
+                self.frame_cycle = 0;
             }
             37281 => {
-                self.pulse1.length_counter_mut().decrement();
-                self.pulse2.length_counter_mut().decrement();
-                self.triangle.length_counter_mut().decrement();
-                self.noise.length_counter_mut().decrement();
+                self.generate_half_frame_clock();
 
-                self.cycle = 0
+                self.frame_cycle = 0
             }
             _ => {} //ignore
         }
-        // clock channels, set irq
     }
 
     fn read_register(&self, register: Register) -> u8 {
@@ -115,22 +109,16 @@ impl APU {
     fn write_register(&mut self, register: Register, data: u8) {
         match register {
             Register::Pulse1_1 => {
-                let duty = data >> 6;
-                let halt = data >> 5;
-                let constant_volume = data >> 4;
-                let volume = data & 0x0f;
-
-                // self.pulse1.channel_mut().duty = duty;
-                // self.pulse1.channel_mut().halt = halt & 0x01 != 0;
-                // self.pulse1.channel_mut().constant_volume = constant_volume & 0x01 != 0;
-                // self.pulse1.channel_mut().volume = volume;
+                self.pulse1.length_counter_mut().set_halt(data & 0x20 != 0);
             }
-            Register::Pulse1_2 => {}
-            Register::Pulse1_3 => {}
             Register::Pulse1_4 => {
                 self.pulse1
                     .length_counter_mut()
                     .load_length_counter(data >> 3);
+            }
+
+            Register::Pulse2_1 => {
+                self.pulse2.length_counter_mut().set_halt(data & 0x20 != 0);
             }
             Register::Pulse2_4 => {
                 self.pulse2
@@ -138,16 +126,26 @@ impl APU {
                     .load_length_counter(data >> 3);
             }
 
+            Register::Triangle1 => {
+                self.triangle
+                    .length_counter_mut()
+                    .set_halt(data & 0x80 != 0);
+            }
             Register::Triangle4 => {
                 self.triangle
                     .length_counter_mut()
                     .load_length_counter(data >> 3);
+            }
+
+            Register::Noise1 => {
+                self.noise.length_counter_mut().set_halt(data & 0x20 != 0);
             }
             Register::Noise4 => {
                 self.noise
                     .length_counter_mut()
                     .load_length_counter(data >> 3);
             }
+
             Register::Status => {
                 let pulse1_enabled = (data & 0x1) != 0;
                 let pulse2_enabled = (data >> 1 & 0x1) != 0;
@@ -164,7 +162,7 @@ impl APU {
                 // TODO: clear DMC interrupt
             }
             Register::FrameCounter => {
-                self.sequencer_mode = data.into();
+                self.pending_sequencer_mode = data.into();
                 self.interrupt_disabled = data & (1 << 6) != 0;
 
                 if self.interrupt_disabled {
@@ -172,29 +170,10 @@ impl APU {
                     self.frame_interrupt_flag_changed.set(true);
                 }
 
-                // Temporary
-                // self.channel1_1 = data & 0x01;
+                self.frame_cycle_reset_delay = if self.frame_cycle % 2 == 0 { 4 } else { 3 };
             }
             _ => {}
         }
-    }
-
-    fn get_frame_counter_reg(&self) -> u8 {
-        let mut result = 0;
-
-        result |= if let FrameCounterSequencerMode::FiveStep = self.sequencer_mode {
-            1 << 7
-        } else {
-            0x00
-        };
-
-        result |= if self.interrupt_disabled {
-            1 << 6
-        } else {
-            0x00
-        };
-
-        result
     }
 
     fn update_interrupt(&mut self) {
@@ -203,15 +182,22 @@ impl APU {
             self.frame_interrupt_flag_changed.set(true);
         }
     }
+
+    fn generate_quarter_frame_clock(&mut self) {}
+
+    fn generate_half_frame_clock(&mut self) {
+        self.pulse1.length_counter_mut().decrement();
+        self.pulse2.length_counter_mut().decrement();
+        self.triangle.length_counter_mut().decrement();
+        self.noise.length_counter_mut().decrement();
+    }
 }
 
 impl Bus for APU {
     fn reset(&mut self) {
-        self.cycle = 7;
+        self.frame_cycle = 7;
 
-        let prior = self.get_frame_counter_reg();
         self.write(0x4015, 0x00);
-        self.write(0x4017, prior); // TODO: Not sure this actually does anything
 
         self.frame_interrupt_flag.set(false);
         self.frame_interrupt_flag_changed.set(true);
@@ -282,7 +268,7 @@ enum Register {
 }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone, Copy)]
 enum FrameCounterSequencerMode {
     #[default]
     FourStep,
@@ -328,8 +314,7 @@ mod tests {
 
         #[test]
         fn len_ctrs_enabled() {
-            // FIXME: The test framework resets the apu, which prevents test from working.  is this correct?
-            // execute_blargg_test("./src/test_roms/apu/reset/len_ctrs_enabled.nes");
+            execute_blargg_test("./src/test_roms/apu/reset/len_ctrs_enabled.nes");
         }
 
         #[ignore = "channels/dmc need to be fully implemented"]
@@ -338,6 +323,13 @@ mod tests {
             execute_blargg_test("./src/test_roms/apu/reset/works_immediately.nes");
         }
     }
-    #[test]
-    fn reset() {}
+
+    mod basics {
+        use super::*;
+
+        #[test]
+        fn len_ctrs() {
+            execute_blargg_test("./src/test_roms/apu/basics/rom_singles/1-len_ctr.nes");
+        }
+    }
 }
