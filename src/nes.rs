@@ -76,7 +76,7 @@ impl SignalProvider for MainBus {
     }
 
     fn clear_interrupt(&mut self) {
-        self.apu.clear_interrupt();
+        // self.apu.clear_interrupt();
     }
 }
 
