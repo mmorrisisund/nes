@@ -400,13 +400,13 @@ impl<T: Bus + SignalProvider> CPU<T> {
         }
     }
 
-    fn force_interrupt_request_update(&mut self) {
-        self.irq_requested = self.bus.interrupt_status();
-        self.bus.clear_interrupt();
+    // fn force_interrupt_request_update(&mut self) {
+    //     self.irq_requested = self.bus.interrupt_status();
+    //     self.bus.clear_interrupt();
 
-        // self.nmi_requested = true;
-        // self.bus.clear_nmi();
-    }
+    //     // self.nmi_requested = true;
+    //     // self.bus.clear_nmi();
+    // }
 
     fn fetch_next_instruction(&mut self) {
         let opcode = self.bus.read(self.reg_pc);
@@ -512,7 +512,7 @@ impl<T: Bus + SignalProvider> CPU<T> {
 
         let mut state = RunState::NormalExecution;
         let instruction = self.next_instruction.take().unwrap();
-        let operand_value = self.get_operand_value(&instruction);
+        // let operand_value = self.get_operand_value(&instruction); // this is dangerous, can cause side effects
         // println!(
         //     "pc: {:02X}, {}, a: {:02X} x: {:02X} m: {:02X}, cpu irq: {}, bus irq: {}, change requested: {}, irq disabled: {}",
         //     self.reg_pc,

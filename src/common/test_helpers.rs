@@ -137,6 +137,7 @@ pub fn execute_blargg_test(file_path: &str) {
     nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
 
     while nes.cpu_bus().read(STATUS_ADDR) == RESET_NEEDED {
+        println!("reset performed");
         nes.reset();
 
         nes.cycle_until_infinite();

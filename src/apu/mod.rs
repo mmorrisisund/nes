@@ -205,6 +205,7 @@ impl Bus for APU {
 
     fn read(&self, address: u16) -> u8 {
         let register = address.try_into();
+
         match register {
             Ok(register) => self.read_register(register),
             _ => panic!("Invalid APU register read: {address:04X}"),
