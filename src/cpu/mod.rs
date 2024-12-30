@@ -1046,34 +1046,76 @@ mod tests {
         }
     }
 
-    #[test]
-    fn functionality() {
-        let file_data = include_bytes!("../test_roms/cpu/functional/6502_functional_test.bin");
-        let mut data = [0; 0x10000];
+    mod functional {
+        use super::*;
 
-        data[0xa..file_data.len() + 0xa].clone_from_slice(file_data);
+        #[test]
+        fn functionality() {
+            let file_data = include_bytes!("../test_roms/cpu/functional/6502_functional_test.bin");
+            let mut data = [0; 0x10000];
 
-        data[0xfffc] = 0x00;
-        data[0xfffd] = 0x04;
+            data[0xa..file_data.len() + 0xa].clone_from_slice(file_data);
 
-        let bus = TestBusBin::new(data);
-        let mut cpu = CPU::new(bus);
+            data[0xfffc] = 0x00;
+            data[0xfffd] = 0x04;
 
-        const SUCCESS_ADDRESS: u16 = 0x336d;
+            let bus = TestBusBin::new(data);
+            let mut cpu = CPU::new(bus);
 
-        cpu.reset();
-        loop {
-            let state = cpu.run_next_instruction();
+            const SUCCESS_ADDRESS: u16 = 0x336d;
 
-            // if we stuck in a loop, return error
-            if let RunState::InfiniteLoop(pc) = state {
-                assert!(
-                    pc == SUCCESS_ADDRESS,
-                    "Test failed at {:04X}, check the `.lst` file for more info",
-                    pc
-                );
-                break;
+            cpu.reset();
+            loop {
+                let state = cpu.run_next_instruction();
+
+                // if we stuck in a loop, return error
+                if let RunState::InfiniteLoop(pc) = state {
+                    assert!(
+                        pc == SUCCESS_ADDRESS,
+                        "Test failed at {:04X}, check the `.lst` file for more info",
+                        pc
+                    );
+                    break;
+                }
             }
+        }
+    }
+
+    mod branch_timing {
+        use super::*;
+
+        #[ignore = "rom doesn't load, possible mapping issue"]
+        #[test]
+        fn basics() {
+            execute_blargg_test("./src/test_roms/cpu/branch_timing/1.Branch_Basics.nes");
+        }
+    }
+
+    mod instr_function {
+        use super::*;
+
+        #[test]
+        fn all_instrs() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/all_instrs.nes");
+        }
+    }
+
+    mod instr_timing {
+        use super::*;
+
+        #[test]
+        fn instr_timing() {
+            execute_blargg_test("./src/test_roms/cpu/instr_timing/instr_timing.nes");
+        }
+    }
+
+    mod interrupts {
+        use super::*;
+
+        // #[ignore]
+        #[test]
+        fn interrupts() {
+            execute_blargg_test("./src/test_roms/cpu/interrupts/cpu_interrupts.nes");
         }
     }
 
@@ -1112,21 +1154,5 @@ mod tests {
                 panic!("entered infinite loop: {pc:04X}");
             }
         }
-    }
-
-    #[test]
-    fn all_instrs() {
-        execute_blargg_test("./src/test_roms/cpu/instr_function/all_instrs.nes");
-    }
-
-    #[test]
-    fn instr_timing() {
-        execute_blargg_test("./src/test_roms/cpu/instr_timing/instr_timing.nes");
-    }
-
-    // #[ignore]
-    #[test]
-    fn interrupts() {
-        execute_blargg_test("./src/test_roms/cpu/interrupts/cpu_interrupts.nes");
     }
 }

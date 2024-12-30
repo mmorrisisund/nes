@@ -2,16 +2,19 @@ mod channel;
 
 use std::{cell::Cell, cmp::Ordering};
 
-use channel::{LengthCountedChannel, NoiseChannel, SquarePulseChannel, TriangleChannel};
+use channel::{
+    square::{Channel, SquarePulse},
+    AudioChannel, EnvelopedChannel, LengthCountedChannel, LengthCountedChannelTemp, TimedChannel,
+};
 
 use crate::common::{bus::Bus, interconnect::InterruptSignaler};
 
 #[derive(Debug, Default)]
 pub struct APU {
-    pulse1: LengthCountedChannel<SquarePulseChannel>,
-    pulse2: LengthCountedChannel<SquarePulseChannel>,
-    triangle: LengthCountedChannel<TriangleChannel>,
-    noise: LengthCountedChannel<NoiseChannel>,
+    pulse1: SquarePulse,
+    pulse2: SquarePulse,
+    triangle: LengthCountedChannelTemp,
+    noise: LengthCountedChannelTemp,
 
     frame_cycle: u16,
     frame_cycle_reset_delay: i8,
@@ -27,6 +30,8 @@ pub struct APU {
 impl APU {
     pub fn new() -> Self {
         Self {
+            pulse1: SquarePulse::new(Channel::One),
+            pulse2: SquarePulse::new(Channel::Two),
             frame_cycle: 5, // TODO: cpu has 7 cycle delay at start, must be odd!!??? or jitter test fails, if 0 both 4017 tests fail, if 1 4017 timing test fails
             frame_cycle_reset_delay: -1,
             ..Default::default()
@@ -51,6 +56,8 @@ impl APU {
             }
             Ordering::Greater => self.frame_cycle_reset_delay -= 1,
         }
+
+        self.clock_timers();
 
         match self.frame_cycle {
             14913 => {
@@ -87,10 +94,10 @@ impl APU {
         match register {
             Register::Status => {
                 // Set status for NT21, DMC Channels
-                let pulse1_enabled = (self.pulse1.length_counter().counter() != 0) as u8;
-                let pulse2_enabled = (self.pulse2.length_counter().counter() != 0) as u8;
-                let triangle_enabled = (self.triangle.length_counter().counter() != 0) as u8;
-                let noise_enabled = (self.noise.length_counter().counter() != 0) as u8;
+                let pulse1_enabled = self.pulse1.enabled() as u8;
+                let pulse2_enabled = self.pulse2.enabled() as u8;
+                let triangle_enabled = (self.triangle.length_counter().count() != 0) as u8;
+                let noise_enabled = (self.noise.length_counter().count() != 0) as u8;
 
                 let frame_interrupt = self.frame_interrupt_flag.get() as u8;
 
@@ -110,21 +117,59 @@ impl APU {
     fn write_register(&mut self, register: Register, data: u8) {
         match register {
             Register::Pulse1_1 => {
-                self.pulse1.length_counter_mut().set_halt(data & 0x20 != 0);
+                self.pulse1.envelop_generator_mut().set_volume(data & 0xf);
+                self.pulse1
+                    .envelop_generator_mut()
+                    .set_constant_volume((data) & 0x10 != 0);
+                self.pulse1.counter_mut().set_halt(data & 0x20 != 0);
+                self.pulse1
+                    .envelop_generator_mut()
+                    .set_loop(data & 0x20 != 0);
+                self.pulse1.update_duty_cycle(data >> 6);
+            }
+            Register::Pulse1_2 => {
+                self.pulse1.sweeper_mut().set_parameters(data);
+            }
+            Register::Pulse1_3 => {
+                let period = self.pulse1.get_period();
+                self.pulse1.set_period((period & 0xff00) | data as u16);
             }
             Register::Pulse1_4 => {
+                self.pulse1.counter_mut().load(data >> 3);
+                self.pulse1.envelop_generator_mut().set_restart(true);
+                let period = self.pulse1.get_period();
                 self.pulse1
-                    .length_counter_mut()
-                    .load_length_counter(data >> 3);
+                    .set_period((period & 0xff) | (data as u16 & 0b111) << 8);
+
+                self.pulse1.sequencer_mut().reset();
             }
 
             Register::Pulse2_1 => {
-                self.pulse2.length_counter_mut().set_halt(data & 0x20 != 0);
+                self.pulse2.envelop_generator_mut().set_volume(data & 0xf);
+                self.pulse2
+                    .envelop_generator_mut()
+                    .set_constant_volume((data) & 0x10 != 0);
+                self.pulse2.counter_mut().set_halt(data & 0x20 != 0);
+                self.pulse2
+                    .envelop_generator_mut()
+                    .set_loop(data & 0x20 != 0);
+                self.pulse2.envelop_generator_mut().set_volume(data >> 6);
+            }
+            Register::Pulse2_2 => {
+                self.pulse2.sweeper_mut().set_parameters(data);
+            }
+            Register::Pulse2_3 => {
+                let period = self.pulse2.get_period();
+                self.pulse2.set_period((period & 0xff00) | data as u16);
             }
             Register::Pulse2_4 => {
+                self.pulse2.counter_mut().load(data >> 3);
+                self.pulse2.envelop_generator_mut().set_restart(true);
+                let period = self.pulse2.get_period();
                 self.pulse2
-                    .length_counter_mut()
-                    .load_length_counter(data >> 3);
+                    .set_period((period & 0xff) | (data as u16 & 0b111) << 8);
+
+                self.pulse2.sequencer_mut().reset();
             }
 
             Register::Triangle1 => {
@@ -133,28 +178,23 @@ impl APU {
                     .set_halt(data & 0x80 != 0);
             }
             Register::Triangle4 => {
-                self.triangle
-                    .length_counter_mut()
-                    .load_length_counter(data >> 3);
+                self.triangle.length_counter_mut().load(data >> 3);
             }
 
             Register::Noise1 => {
                 self.noise.length_counter_mut().set_halt(data & 0x20 != 0);
             }
             Register::Noise4 => {
-                self.noise
-                    .length_counter_mut()
-                    .load_length_counter(data >> 3);
+                self.noise.length_counter_mut().load(data >> 3);
             }
 
             Register::Status => {
-                let pulse1_enabled = (data & 0x1) != 0;
-                let pulse2_enabled = (data >> 1 & 0x1) != 0;
+                self.pulse1.set_enabled((data & 0x1) != 0);
+                self.pulse2.set_enabled((data >> 1 & 0x1) != 0);
+
                 let triangle_enabled = (data >> 2 & 0x1) != 0;
                 let noise_enabled = (data >> 3 & 0x1) != 0;
 
-                self.pulse1.length_counter_mut().set_enabled(pulse1_enabled);
-                self.pulse2.length_counter_mut().set_enabled(pulse2_enabled);
                 self.triangle
                     .length_counter_mut()
                     .set_enabled(triangle_enabled);
@@ -183,13 +223,34 @@ impl APU {
         }
     }
 
-    fn generate_quarter_frame_clock(&mut self) {}
+    fn clock_timers(&mut self) {
+        if self.pulse1.timer_mut().clock() {
+            self.pulse1.sequencer_mut().advance();
+        }
+
+        if self.pulse2.timer_mut().clock() {
+            self.pulse2.sequencer_mut().advance();
+        }
+    }
+
+    fn generate_quarter_frame_clock(&mut self) {
+        self.pulse1.envelop_generator_mut().clock();
+        self.pulse2.envelop_generator_mut().clock();
+    }
 
     fn generate_half_frame_clock(&mut self) {
-        self.pulse1.length_counter_mut().decrement();
-        self.pulse2.length_counter_mut().decrement();
-        self.triangle.length_counter_mut().decrement();
-        self.noise.length_counter_mut().decrement();
+        self.pulse1.counter_mut().clock();
+        self.pulse2.counter_mut().clock();
+        self.triangle.length_counter_mut().clock();
+        self.noise.length_counter_mut().clock();
+
+        if let Some(period) = self.pulse1.sweeper_mut().clock() {
+            self.pulse1.timer_mut().set_period(period);
+        }
+
+        if let Some(period) = self.pulse2.sweeper_mut().clock() {
+            self.pulse2.timer_mut().set_period(period);
+        }
     }
 }
 
@@ -214,7 +275,6 @@ impl Bus for APU {
 
     fn write(&mut self, address: u16, data: u8) {
         let register = address.try_into();
-
         match register {
             Ok(register) => self.write_register(register, data),
             _ => panic!("Invalid APU register write: {address:04X}"),
@@ -356,6 +416,12 @@ mod tests {
         #[test]
         fn irq_flag_timing() {
             execute_blargg_test("./src/test_roms/apu/basics/rom_singles/6-irq_flag_timing.nes");
+        }
+
+        #[ignore = "not implemented"]
+        #[test]
+        fn dmc_basics() {
+            execute_blargg_test("./src/test_roms/apu/basics/rom_singles/7-dmc_basics.nes");
         }
     }
 }

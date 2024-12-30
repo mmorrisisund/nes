@@ -205,6 +205,7 @@ impl Bus for Cartridge {
                 // };
                 // self.prg_rom[address as usize - 0x8000]
                 if self.header.mapper == 0 {
+                    // self.prg_rom[address as usize - 0x8000]
                     self.prg_rom[address as usize - 0x8000]
                 } else {
                     self.prg_rom[address as usize & 0xbfff & 0x7fff]
