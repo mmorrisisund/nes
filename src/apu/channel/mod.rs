@@ -1,22 +1,56 @@
-pub mod square;
+pub mod pulse;
 
-pub trait AudioChannel {
+pub trait ApuChannel {
     fn enabled(&self) -> bool;
     fn set_enabled(&mut self, enabled: bool);
 
     fn get_output(&self) -> f32;
 }
 
-pub trait LengthCountedChannel {
-    fn counter_mut(&mut self) -> &mut LengthCounter;
+pub trait FrameTrigger {
+    fn clock_quarter_frame(&mut self);
+    fn clock_half_frame(&mut self);
 }
 
-pub trait TimedChannel {
-    fn timer_mut(&mut self) -> &mut Timer;
+pub trait TimerTrait {
+    fn clock(&mut self);
 }
 
-pub trait EnvelopedChannel {
-    fn envelop_generator_mut(&mut self) -> &mut EnvelopeGenerator;
+#[derive(Debug, PartialEq, Eq)]
+pub enum Channel {
+    Pulse1,
+    Pulse2,
+}
+
+#[derive(Debug, Default)]
+pub struct Timer {
+    count: usize,
+    divider: usize,
+    period: usize,
+}
+
+impl Timer {
+    pub fn new(period: usize, divider: usize) -> Self {
+        Self {
+            count: period * divider,
+            divider,
+            period,
+        }
+    }
+
+    pub fn clock(&mut self) -> bool {
+        if self.count == 0 {
+            self.count = self.period * self.divider;
+            true
+        } else {
+            self.count -= 1;
+            false
+        }
+    }
+
+    pub fn set_period(&mut self, period: usize) {
+        self.period = period * self.divider
+    }
 }
 
 const LENGTH_TABLE: [u8; 0x20] = [
@@ -60,6 +94,7 @@ impl LengthCounter {
         self.halt = halt
     }
 
+    // TODO: Should this be a TimerTrait impl?
     pub fn clock(&mut self) {
         self.counter = if self.enabled {
             if !self.halt {
@@ -89,32 +124,6 @@ impl LengthCountedChannelTemp {
 }
 
 #[derive(Debug, Default)]
-pub struct Timer {
-    count: u16,
-    period: u16,
-}
-
-impl Timer {
-    pub fn clock(&mut self) -> bool {
-        if self.count == 0 {
-            self.count = self.period;
-            true
-        } else {
-            self.count -= 1;
-            false
-        }
-    }
-
-    pub fn set_period(&mut self, period: u16) {
-        self.period = period
-    }
-
-    fn period(&self) -> u16 {
-        self.period
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct Sequencer {
     sequence: Vec<u8>,
     position: usize,
@@ -137,27 +146,18 @@ impl Sequencer {
         self.position = 0;
     }
 
-    pub fn advance(&mut self) {
+    pub fn clock(&mut self) {
         self.position = self.position.wrapping_add(1) % self.length();
-    }
-
-    pub fn length(&self) -> usize {
-        self.sequence.len()
     }
 
     pub fn value(&self) -> u8 {
         *self.sequence.get(self.position).unwrap_or(&0)
     }
+
+    fn length(&self) -> usize {
+        self.sequence.len()
+    }
 }
-
-#[derive(Debug, Default)]
-pub struct SquarePulseChannel {}
-
-#[derive(Debug, Default)]
-pub struct TriangleChannel {}
-
-#[derive(Debug, Default)]
-pub struct NoiseChannel {}
 
 #[derive(Debug, Default)]
 pub struct EnvelopeGenerator {
@@ -167,7 +167,7 @@ pub struct EnvelopeGenerator {
     volume: u8,
 
     decay_level: u8,
-    divider: Divider,
+    count: u8,
 }
 
 impl EnvelopeGenerator {
@@ -175,8 +175,11 @@ impl EnvelopeGenerator {
         if self.restart {
             self.restart = false;
             self.decay_level = 15;
-            self.divider.reset();
-        } else if self.divider.clock() {
+            self.count = self.volume;
+        } else if self.count > 0 {
+            self.count -= 1;
+        } else {
+            self.count = self.volume;
             if self.decay_level > 0 {
                 self.decay_level -= 1;
             } else if self.loop_flag {
@@ -193,46 +196,18 @@ impl EnvelopeGenerator {
         }
     }
 
-    pub fn set_restart(&mut self, value: bool) {
-        self.restart = value;
+    pub fn set_parameters(&mut self, value: u8) {
+        self.set_volume(value & 0xf);
+        self.constant_volume = value & 0x10 != 0;
+        self.loop_flag = value & 0x20 != 0;
     }
 
-    pub fn set_loop(&mut self, value: bool) {
-        self.loop_flag = value;
+    pub fn restart(&mut self) {
+        self.restart = true;
     }
 
-    pub fn set_constant_volume(&mut self, value: bool) {
-        self.constant_volume = value;
-    }
-
-    pub fn set_volume(&mut self, value: u8) {
+    fn set_volume(&mut self, value: u8) {
         self.volume = value;
-        self.divider.set_period(value as u16);
-    }
-}
-
-#[derive(Debug, Default)]
-struct Divider {
-    count: u16,
-    period: u16,
-}
-
-impl Divider {
-    fn clock(&mut self) -> bool {
-        if self.count == 0 {
-            self.reset();
-            true
-        } else {
-            self.count -= 1;
-            false
-        }
-    }
-
-    fn reset(&mut self) {
-        self.count = self.period
-    }
-
-    fn set_period(&mut self, period: u16) {
-        self.period = period;
+        self.count = value;
     }
 }

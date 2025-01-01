@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::{
-    apu::APU,
+    apu::{ApuRegisters, Channel, APU},
     cartridge::{Cartridge, CartridgeError},
     common::{
         bus::Bus,
@@ -49,7 +49,15 @@ impl Bus for MainBus {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize] = data, // ram
             0x2000..0x4000 => {}                                           // ppu
-            0x4000..0x4014 | 0x4015 | 0x4017 => self.apu.write(address, data),
+            0x4000 => self.apu.write_ctrl(Channel::Pulse1, data),
+            0x4001 => self.apu.write_sweep(Channel::Pulse1, data),
+            0x4002 => self.apu.write_timer_lo(Channel::Pulse1, data),
+            0x4003 => self.apu.write_timer_hi(Channel::Pulse1, data),
+            0x4004 => self.apu.write_ctrl(Channel::Pulse2, data),
+            0x4005 => self.apu.write_sweep(Channel::Pulse2, data),
+            0x4006 => self.apu.write_timer_lo(Channel::Pulse2, data),
+            0x4007 => self.apu.write_timer_hi(Channel::Pulse2, data),
+            0x4008..0x4014 | 0x4015 | 0x4017 => self.apu.write(address, data),
             0x4014 => {}                                     // ppu
             0x4016 => {}                                     // controller
             0x4018..0x4020 => {}                             // unused (test mode)

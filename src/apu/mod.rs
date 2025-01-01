@@ -2,17 +2,27 @@ mod channel;
 
 use std::{cell::Cell, cmp::Ordering};
 
+pub use channel::Channel;
+
 use channel::{
-    square::{Channel, SquarePulse},
-    AudioChannel, EnvelopedChannel, LengthCountedChannel, LengthCountedChannelTemp, TimedChannel,
+    pulse::{Pulse, PulseChannel},
+    ApuChannel, FrameTrigger, LengthCountedChannelTemp, TimerTrait,
 };
 
 use crate::common::{bus::Bus, interconnect::InterruptSignaler};
 
-#[derive(Debug, Default)]
+pub trait ApuRegisters {
+    fn write_ctrl(&mut self, channel: Channel, val: u8);
+    fn write_sweep(&mut self, channel: Channel, val: u8);
+    fn write_timer_lo(&mut self, channel: Channel, val: u8);
+    fn write_timer_hi(&mut self, channel: Channel, val: u8);
+    // fn write_length(&mut self, channel: Channel, val: u8);
+}
+
+#[derive(Debug)]
 pub struct APU {
-    pulse1: SquarePulse,
-    pulse2: SquarePulse,
+    pulse1: Pulse,
+    pulse2: Pulse,
     triangle: LengthCountedChannelTemp,
     noise: LengthCountedChannelTemp,
 
@@ -27,14 +37,28 @@ pub struct APU {
     pending_sequencer_mode: FrameCounterSequencerMode,
 }
 
+impl Default for APU {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl APU {
     pub fn new() -> Self {
         Self {
-            pulse1: SquarePulse::new(Channel::One),
-            pulse2: SquarePulse::new(Channel::Two),
+            pulse1: Pulse::new(PulseChannel::One),
+            pulse2: Pulse::new(PulseChannel::Two),
+            triangle: LengthCountedChannelTemp::default(),
+            noise: LengthCountedChannelTemp::default(),
             frame_cycle: 5, // TODO: cpu has 7 cycle delay at start, must be odd!!??? or jitter test fails, if 0 both 4017 tests fail, if 1 4017 timing test fails
             frame_cycle_reset_delay: -1,
-            ..Default::default()
+
+            frame_interrupt_flag: Cell::new(false),
+            frame_interrupt_flag_changed: Cell::new(false),
+
+            interrupt_disabled: false,
+            sequencer_mode: FrameCounterSequencerMode::FourStep,
+            pending_sequencer_mode: FrameCounterSequencerMode::FourStep,
         }
     }
 
@@ -116,62 +140,6 @@ impl APU {
 
     fn write_register(&mut self, register: Register, data: u8) {
         match register {
-            Register::Pulse1_1 => {
-                self.pulse1.envelop_generator_mut().set_volume(data & 0xf);
-                self.pulse1
-                    .envelop_generator_mut()
-                    .set_constant_volume((data) & 0x10 != 0);
-                self.pulse1.counter_mut().set_halt(data & 0x20 != 0);
-                self.pulse1
-                    .envelop_generator_mut()
-                    .set_loop(data & 0x20 != 0);
-                self.pulse1.update_duty_cycle(data >> 6);
-            }
-            Register::Pulse1_2 => {
-                self.pulse1.sweeper_mut().set_parameters(data);
-            }
-            Register::Pulse1_3 => {
-                let period = self.pulse1.get_period();
-                self.pulse1.set_period((period & 0xff00) | data as u16);
-            }
-            Register::Pulse1_4 => {
-                self.pulse1.counter_mut().load(data >> 3);
-                self.pulse1.envelop_generator_mut().set_restart(true);
-                let period = self.pulse1.get_period();
-                self.pulse1
-                    .set_period((period & 0xff) | (data as u16 & 0b111) << 8);
-
-                self.pulse1.sequencer_mut().reset();
-            }
-
-            Register::Pulse2_1 => {
-                self.pulse2.envelop_generator_mut().set_volume(data & 0xf);
-                self.pulse2
-                    .envelop_generator_mut()
-                    .set_constant_volume((data) & 0x10 != 0);
-                self.pulse2.counter_mut().set_halt(data & 0x20 != 0);
-                self.pulse2
-                    .envelop_generator_mut()
-                    .set_loop(data & 0x20 != 0);
-                self.pulse2.envelop_generator_mut().set_volume(data >> 6);
-            }
-            Register::Pulse2_2 => {
-                self.pulse2.sweeper_mut().set_parameters(data);
-            }
-            Register::Pulse2_3 => {
-                let period = self.pulse2.get_period();
-                self.pulse2.set_period((period & 0xff00) | data as u16);
-            }
-            Register::Pulse2_4 => {
-                self.pulse2.counter_mut().load(data >> 3);
-                self.pulse2.envelop_generator_mut().set_restart(true);
-                let period = self.pulse2.get_period();
-                self.pulse2
-                    .set_period((period & 0xff) | (data as u16 & 0b111) << 8);
-
-                self.pulse2.sequencer_mut().reset();
-            }
-
             Register::Triangle1 => {
                 self.triangle
                     .length_counter_mut()
@@ -224,32 +192,52 @@ impl APU {
     }
 
     fn clock_timers(&mut self) {
-        if self.pulse1.timer_mut().clock() {
-            self.pulse1.sequencer_mut().advance();
-        }
-
-        if self.pulse2.timer_mut().clock() {
-            self.pulse2.sequencer_mut().advance();
-        }
+        self.pulse1.clock();
+        self.pulse2.clock();
     }
 
     fn generate_quarter_frame_clock(&mut self) {
-        self.pulse1.envelop_generator_mut().clock();
-        self.pulse2.envelop_generator_mut().clock();
+        self.pulse1.clock_quarter_frame();
+        self.pulse2.clock_quarter_frame();
     }
 
     fn generate_half_frame_clock(&mut self) {
-        self.pulse1.counter_mut().clock();
-        self.pulse2.counter_mut().clock();
+        self.pulse1.clock_half_frame();
+        self.pulse2.clock_half_frame();
+
         self.triangle.length_counter_mut().clock();
         self.noise.length_counter_mut().clock();
+    }
+}
 
-        if let Some(period) = self.pulse1.sweeper_mut().clock() {
-            self.pulse1.timer_mut().set_period(period);
+impl ApuRegisters for APU {
+    fn write_ctrl(&mut self, channel: Channel, val: u8) {
+        match channel {
+            Channel::Pulse1 => self.pulse1.write_ctrl(val),
+            Channel::Pulse2 => self.pulse2.write_ctrl(val),
         }
+    }
 
-        if let Some(period) = self.pulse2.sweeper_mut().clock() {
-            self.pulse2.timer_mut().set_period(period);
+    fn write_sweep(&mut self, channel: Channel, val: u8) {
+        match channel {
+            Channel::Pulse1 => self.pulse1.write_sweep(val),
+            Channel::Pulse2 => self.pulse2.write_sweep(val),
+        }
+    }
+
+    fn write_timer_lo(&mut self, channel: Channel, val: u8) {
+        // todo!("set pulse channel period, not timer period");
+        match channel {
+            Channel::Pulse1 => self.pulse1.write_timer_lo(val),
+            Channel::Pulse2 => self.pulse2.write_timer_lo(val),
+        }
+    }
+
+    fn write_timer_hi(&mut self, channel: Channel, val: u8) {
+        // todo!("set pulse channel period, not timer period");
+        match channel {
+            Channel::Pulse1 => self.pulse1.write_timer_hi(val),
+            Channel::Pulse2 => self.pulse2.write_timer_hi(val),
         }
     }
 }
