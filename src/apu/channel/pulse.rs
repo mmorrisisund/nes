@@ -43,17 +43,17 @@ impl Pulse {
         self.update_duty_cycle((value >> 6) as usize);
     }
 
-    pub fn write_sweep(&mut self, val: u8) {
-        self.sweep.set_parameters(val);
+    pub fn write_sweep(&mut self, value: u8) {
+        self.sweep.set_parameters(value);
     }
 
-    pub fn write_timer_lo(&mut self, val: u8) {
-        self.set_period((self.period & 0x0700) | val as usize);
+    pub fn write_timer_lo(&mut self, value: u8) {
+        self.set_period((self.period & 0x0700) | value as usize);
     }
 
-    pub fn write_timer_hi(&mut self, val: u8) {
-        self.set_period((self.period & 0xff) | (val as usize & 0b111) << 8);
-        self.length_counter.load(val >> 3);
+    pub fn write_timer_hi(&mut self, value: u8) {
+        self.set_period((self.period & 0xff) | (value as usize & 0b111) << 8);
+        self.length_counter.load(value >> 3);
 
         self.envelope.restart();
         self.sequencer.reset();

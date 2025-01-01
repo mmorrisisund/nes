@@ -1,4 +1,5 @@
 pub mod pulse;
+pub mod triangle;
 
 pub trait ApuChannel {
     fn enabled(&self) -> bool;
@@ -20,6 +21,7 @@ pub trait TimerTrait {
 pub enum Channel {
     Pulse1,
     Pulse2,
+    Triangle,
 }
 
 #[derive(Debug, Default)]
@@ -50,6 +52,10 @@ impl Timer {
 
     pub fn set_period(&mut self, period: usize) {
         self.period = period * self.divider
+    }
+
+    pub fn period(&self) -> usize {
+        self.period
     }
 }
 
