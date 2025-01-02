@@ -19,6 +19,11 @@ pub trait ApuRegisters {
     fn write_timer_lo(&mut self, channel: Channel, value: u8);
     fn write_timer_hi(&mut self, channel: Channel, value: u8);
     fn write_length(&mut self, channel: Channel, value: u8);
+
+    fn read_status(&mut self) -> u8;
+    fn peek_status(&self) -> u8;
+    fn write_status(&mut self, value: u8);
+    fn write_frame_counter(&mut self, value: u8);
 }
 
 #[derive(Debug)]
@@ -116,55 +121,6 @@ impl APU {
         }
     }
 
-    fn read_register(&self, register: Register) -> u8 {
-        match register {
-            Register::Status => {
-                // Set status for NT21, DMC Channels
-                let pulse1_enabled = self.pulse1.enabled() as u8;
-                let pulse2_enabled = self.pulse2.enabled() as u8;
-                let triangle_enabled = self.triangle.enabled() as u8;
-                let noise_enabled = self.noise.enabled() as u8;
-
-                let frame_interrupt = self.frame_interrupt_flag.get() as u8;
-
-                self.frame_interrupt_flag.set(false);
-                self.frame_interrupt_flag_changed.set(true);
-
-                frame_interrupt << 6
-                    | noise_enabled << 3
-                    | triangle_enabled << 2
-                    | pulse2_enabled << 1
-                    | pulse1_enabled
-            }
-            _ => 0, // REVIEW: invalid for all other reads.  should this panic?
-        }
-    }
-
-    fn write_register(&mut self, register: Register, data: u8) {
-        match register {
-            Register::Status => {
-                self.pulse1.set_enabled((data & 0x1) != 0);
-                self.pulse2.set_enabled((data >> 1 & 0x1) != 0);
-                self.triangle.set_enabled((data >> 2 & 0x1) != 0);
-                self.noise.set_enabled((data >> 3 & 0x1) != 0);
-
-                // TODO:  DMC channels
-                // TODO: clear DMC interrupt
-            }
-            Register::FrameCounter => {
-                self.pending_sequencer_mode = data.into();
-                self.interrupt_disabled = data & (1 << 6) != 0;
-
-                if self.interrupt_disabled {
-                    self.frame_interrupt_flag.set(false);
-                    self.frame_interrupt_flag_changed.set(true);
-                }
-                self.frame_cycle_reset_delay = if self.frame_cycle % 2 == 0 { 3 } else { 2 };
-            }
-            _ => {}
-        }
-    }
-
     fn update_interrupt(&mut self) {
         if !self.interrupt_disabled {
             self.frame_interrupt_flag.set(true);
@@ -234,33 +190,76 @@ impl ApuRegisters for APU {
             _ => panic!("{channel:?} does not have a length register"),
         }
     }
+
+    fn read_status(&mut self) -> u8 {
+        let status = self.peek_status();
+
+        self.frame_interrupt_flag.set(false);
+        self.frame_interrupt_flag_changed.set(true);
+
+        status
+    }
+
+    fn peek_status(&self) -> u8 {
+        let pulse1_enabled = self.pulse1.enabled() as u8;
+        let pulse2_enabled = self.pulse2.enabled() as u8;
+        let triangle_enabled = self.triangle.enabled() as u8;
+        let noise_enabled = self.noise.enabled() as u8;
+        let frame_interrupt = self.frame_interrupt_flag.get() as u8;
+
+        frame_interrupt << 6
+            | noise_enabled << 3
+            | triangle_enabled << 2
+            | pulse2_enabled << 1
+            | pulse1_enabled
+    }
+
+    fn write_status(&mut self, value: u8) {
+        self.pulse1.set_enabled((value & 0x1) != 0);
+        self.pulse2.set_enabled((value >> 1 & 0x1) != 0);
+        self.triangle.set_enabled((value >> 2 & 0x1) != 0);
+        self.noise.set_enabled((value >> 3 & 0x1) != 0);
+
+        // TODO:  DMC channels
+        // TODO: clear DMC interrupt
+    }
+
+    fn write_frame_counter(&mut self, value: u8) {
+        self.pending_sequencer_mode = value.into();
+        self.interrupt_disabled = value & (1 << 6) != 0;
+
+        if self.interrupt_disabled {
+            self.frame_interrupt_flag.set(false);
+            self.frame_interrupt_flag_changed.set(true);
+        }
+        self.frame_cycle_reset_delay = if self.frame_cycle % 2 == 0 { 3 } else { 2 };
+    }
 }
 
 impl Bus for APU {
     fn reset(&mut self) {
         self.frame_cycle = 7;
 
-        self.write(0x4015, 0x00);
+        self.write_status(0x00);
 
         self.frame_interrupt_flag.set(false);
         self.frame_interrupt_flag_changed.set(true);
     }
 
-    fn read(&self, address: u16) -> u8 {
-        let register = address.try_into();
-
-        match register {
-            Ok(register) => self.read_register(register),
-            _ => panic!("Invalid APU register read: {address:04X}"),
-        }
+    fn read(&mut self, _address: u16) -> u8 {
+        0
+        // match register {
+        //     Ok(register) => self.read_register(register),
+        //     _ => panic!("Invalid APU register read: {address:04X}"),
+        // }
     }
 
-    fn write(&mut self, address: u16, data: u8) {
-        let register = address.try_into();
-        match register {
-            Ok(register) => self.write_register(register, data),
-            _ => panic!("Invalid APU register write: {address:04X}"),
-        }
+    fn write(&mut self, _address: u16, _data: u8) {
+        // let register = address.try_into();
+        // match register {
+        //     Ok(register) => self.write_register(register, data),
+        //     _ => panic!("Invalid APU register write: {address:04X}"),
+        // }
     }
 }
 

@@ -1011,7 +1011,7 @@ mod tests {
 
     impl Bus for TestBusBin {
         fn reset(&mut self) {}
-        fn read(&self, address: u16) -> u8 {
+        fn read(&mut self, address: u16) -> u8 {
             self.data[address as usize]
         }
 

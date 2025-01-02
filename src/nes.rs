@@ -33,11 +33,13 @@ impl Bus for MainBus {
     fn reset(&mut self) {
         self.apu.reset();
     }
-    fn read(&self, address: u16) -> u8 {
+
+    fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
             0x2000..0x4000 => 0,                                    // ppu
-            0x4000..0x4014 | 0x4015 | 0x4017 => self.apu.read(address),
+            0x4000..0x4014 | 0x4017 => 0,
+            0x4015 => self.apu.read_status(),
             0x4014 => 0,                              // ppu
             0x4016 => 0,                              // controller
             0x4018..0x4020 => 0,                      // unused (test mode)
@@ -65,7 +67,9 @@ impl Bus for MainBus {
             0x400d => {} // unused
             0x400e => self.apu.write_timer_lo(Channel::Noise, data),
             0x400f => self.apu.write_length(Channel::Noise, data),
-            0x4010..0x4014 | 0x4015 | 0x4017 => self.apu.write(address, data),
+            0x4010..0x4014 => {}
+            0x4015 => self.apu.write_status(data),
+            0x4017 => self.apu.write_frame_counter(data),
             0x4014 => {}                                     // ppu
             0x4016 => {}                                     // controller
             0x4018..0x4020 => {}                             // unused (test mode)

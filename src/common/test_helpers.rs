@@ -46,14 +46,19 @@ impl TestNes {
         loop {
             self.nes.cycle_tick();
 
-            if self.nes.bus().read(address) != value {
+            if self.nes.bus_mut().read(address) != value {
                 return;
             }
         }
     }
 
+    #[allow(dead_code)]
     fn cpu_bus(&self) -> &MainBus {
         self.nes.bus()
+    }
+
+    fn cpu_bus_mut(&mut self) -> &mut MainBus {
+        self.nes.bus_mut()
     }
 }
 
@@ -80,7 +85,7 @@ impl Bus for TestBusRom {
         self.apu.reset();
     }
 
-    fn read(&self, address: u16) -> u8 {
+    fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
             0x2000..0x4000 => 0,                                    // ppu
@@ -136,7 +141,8 @@ pub fn execute_blargg_test(file_path: &str) {
     nes.cycle_until_infinite();
     nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
 
-    while nes.cpu_bus().read(STATUS_ADDR) == RESET_NEEDED {
+    // let mut status = ;
+    while nes.cpu_bus_mut().read(STATUS_ADDR) == RESET_NEEDED {
         println!("reset performed");
         nes.reset();
 
@@ -144,21 +150,21 @@ pub fn execute_blargg_test(file_path: &str) {
         nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
     }
 
-    let result = nes.cpu_bus().read(STATUS_ADDR);
-    let text = get_text_output(&nes);
+    let result = nes.cpu_bus_mut().read(STATUS_ADDR);
+    let text = get_text_output(&mut nes);
     assert_eq!(result, 0, "\n{}", text);
 }
 
-fn get_text_output(nes: &TestNes) -> String {
+fn get_text_output(nes: &mut TestNes) -> String {
     let mut addr = TEXT_ADDR;
     let mut chars = Vec::new();
-    let mut c = nes.cpu_bus().read(addr);
+    let mut c = nes.cpu_bus_mut().read(addr);
 
     while c != 0 {
         chars.push(c);
 
         addr += 1;
-        c = nes.cpu_bus().read(addr)
+        c = nes.cpu_bus_mut().read(addr)
     }
 
     if !chars.is_empty() {

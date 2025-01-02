@@ -189,7 +189,7 @@ impl Bus for Cartridge {
         todo!()
     }
 
-    fn read(&self, address: u16) -> u8 {
+    fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => todo!(), // ppu
             0x2000..0x6000 => unreachable!(),

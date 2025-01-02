@@ -1,10 +1,10 @@
 pub trait Bus {
     fn reset(&mut self);
 
-    fn read(&self, address: u16) -> u8;
+    fn read(&mut self, address: u16) -> u8;
     fn write(&mut self, address: u16, data: u8);
 
-    fn read_u16(&self, address: u16) -> u16 {
+    fn read_u16(&mut self, address: u16) -> u16 {
         let lo = self.read(address) as u16;
         let hi = self.read(address + 1) as u16;
 
