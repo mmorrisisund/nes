@@ -1,3 +1,4 @@
+pub mod noise;
 pub mod pulse;
 pub mod triangle;
 
@@ -22,6 +23,7 @@ pub enum Channel {
     Pulse1,
     Pulse2,
     Triangle,
+    Noise,
 }
 
 #[derive(Debug, Default)]
@@ -111,21 +113,6 @@ impl LengthCounter {
         } else {
             0
         };
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct LengthCountedChannelTemp {
-    counter: LengthCounter,
-}
-
-impl LengthCountedChannelTemp {
-    pub fn length_counter(&self) -> &LengthCounter {
-        &self.counter
-    }
-
-    pub fn length_counter_mut(&mut self) -> &mut LengthCounter {
-        &mut self.counter
     }
 }
 

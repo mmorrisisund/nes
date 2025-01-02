@@ -61,7 +61,11 @@ impl Bus for MainBus {
             0x4009 => {} // unused
             0x400a => self.apu.write_timer_lo(Channel::Triangle, data),
             0x400b => self.apu.write_timer_hi(Channel::Triangle, data),
-            0x400c..0x4014 | 0x4015 | 0x4017 => self.apu.write(address, data),
+            0x400c => self.apu.write_ctrl(Channel::Noise, data),
+            0x400d => {} // unused
+            0x400e => self.apu.write_timer_lo(Channel::Noise, data),
+            0x400f => self.apu.write_length(Channel::Noise, data),
+            0x4010..0x4014 | 0x4015 | 0x4017 => self.apu.write(address, data),
             0x4014 => {}                                     // ppu
             0x4016 => {}                                     // controller
             0x4018..0x4020 => {}                             // unused (test mode)

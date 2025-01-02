@@ -5,9 +5,10 @@ use std::{cell::Cell, cmp::Ordering};
 pub use channel::Channel;
 
 use channel::{
+    noise::Noise,
     pulse::{Pulse, PulseChannel},
     triangle::Triangle,
-    ApuChannel, FrameTrigger, LengthCountedChannelTemp, TimerTrait,
+    ApuChannel, FrameTrigger, TimerTrait,
 };
 
 use crate::common::{bus::Bus, interconnect::InterruptSignaler};
@@ -17,7 +18,7 @@ pub trait ApuRegisters {
     fn write_sweep(&mut self, channel: Channel, value: u8);
     fn write_timer_lo(&mut self, channel: Channel, value: u8);
     fn write_timer_hi(&mut self, channel: Channel, value: u8);
-    // fn write_length(&mut self, channel: Channel, val: u8);
+    fn write_length(&mut self, channel: Channel, value: u8);
 }
 
 #[derive(Debug)]
@@ -25,7 +26,7 @@ pub struct APU {
     pulse1: Pulse,
     pulse2: Pulse,
     triangle: Triangle,
-    noise: LengthCountedChannelTemp,
+    noise: Noise,
 
     frame_cycle: u16,
     frame_cycle_reset_delay: i8,
@@ -50,7 +51,7 @@ impl APU {
             pulse1: Pulse::new(PulseChannel::One),
             pulse2: Pulse::new(PulseChannel::Two),
             triangle: Triangle::new(),
-            noise: LengthCountedChannelTemp::default(),
+            noise: Noise::new(),
             frame_cycle: 5, // TODO: cpu has 7 cycle delay at start, must be odd!!??? or jitter test fails, if 0 both 4017 tests fail, if 1 4017 timing test fails
             frame_cycle_reset_delay: -1,
 
@@ -122,7 +123,7 @@ impl APU {
                 let pulse1_enabled = self.pulse1.enabled() as u8;
                 let pulse2_enabled = self.pulse2.enabled() as u8;
                 let triangle_enabled = self.triangle.enabled() as u8;
-                let noise_enabled = (self.noise.length_counter().count() != 0) as u8;
+                let noise_enabled = self.noise.enabled() as u8;
 
                 let frame_interrupt = self.frame_interrupt_flag.get() as u8;
 
@@ -141,21 +142,12 @@ impl APU {
 
     fn write_register(&mut self, register: Register, data: u8) {
         match register {
-            Register::Noise1 => {
-                self.noise.length_counter_mut().set_halt(data & 0x20 != 0);
-            }
-            Register::Noise4 => {
-                self.noise.length_counter_mut().load(data >> 3);
-            }
-
             Register::Status => {
                 self.pulse1.set_enabled((data & 0x1) != 0);
                 self.pulse2.set_enabled((data >> 1 & 0x1) != 0);
                 self.triangle.set_enabled((data >> 2 & 0x1) != 0);
+                self.noise.set_enabled((data >> 3 & 0x1) != 0);
 
-                let noise_enabled = (data >> 3 & 0x1) != 0;
-
-                self.noise.length_counter_mut().set_enabled(noise_enabled);
                 // TODO:  DMC channels
                 // TODO: clear DMC interrupt
             }
@@ -188,14 +180,15 @@ impl APU {
     fn generate_quarter_frame_clock(&mut self) {
         self.pulse1.clock_quarter_frame();
         self.pulse2.clock_quarter_frame();
+        self.triangle.clock_quarter_frame();
+        self.noise.clock_quarter_frame();
     }
 
     fn generate_half_frame_clock(&mut self) {
         self.pulse1.clock_half_frame();
         self.pulse2.clock_half_frame();
         self.triangle.clock_half_frame();
-
-        self.noise.length_counter_mut().clock();
+        self.noise.clock_half_frame();
     }
 }
 
@@ -205,6 +198,7 @@ impl ApuRegisters for APU {
             Channel::Pulse1 => self.pulse1.write_ctrl(value),
             Channel::Pulse2 => self.pulse2.write_ctrl(value),
             Channel::Triangle => self.triangle.write_ctrl(value),
+            Channel::Noise => self.noise.write_ctrl(value),
         }
     }
 
@@ -212,7 +206,7 @@ impl ApuRegisters for APU {
         match channel {
             Channel::Pulse1 => self.pulse1.write_sweep(value),
             Channel::Pulse2 => self.pulse2.write_sweep(value),
-            Channel::Triangle => println!("{channel:?} does not have a sweep register"),
+            _ => panic!("{channel:?} does not have a sweep register"),
         }
     }
 
@@ -221,6 +215,7 @@ impl ApuRegisters for APU {
             Channel::Pulse1 => self.pulse1.write_timer_lo(value),
             Channel::Pulse2 => self.pulse2.write_timer_lo(value),
             Channel::Triangle => self.triangle.write_timer_lo(value),
+            Channel::Noise => self.noise.write_timer(value),
         }
     }
 
@@ -229,6 +224,14 @@ impl ApuRegisters for APU {
             Channel::Pulse1 => self.pulse1.write_timer_hi(value),
             Channel::Pulse2 => self.pulse2.write_timer_hi(value),
             Channel::Triangle => self.triangle.write_timer_hi(value),
+            _ => panic!("{channel:?} does not have a timer hi register"),
+        }
+    }
+
+    fn write_length(&mut self, channel: Channel, value: u8) {
+        match channel {
+            Channel::Noise => self.noise.write_length(value),
+            _ => panic!("{channel:?} does not have a length register"),
         }
     }
 }
