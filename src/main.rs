@@ -1,11 +1,10 @@
-#[macro_use]
-pub mod common;
-
-pub mod apu;
-pub mod cartridge;
-pub mod cpu;
-pub mod nes;
-pub mod ppu;
+mod apu;
+pub mod bus;
+mod cartridge;
+mod common;
+mod cpu;
+mod nes;
+mod ppu;
 
 use cpu::RunState;
 use nes::Nes;

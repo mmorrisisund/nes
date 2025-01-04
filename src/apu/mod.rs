@@ -11,7 +11,7 @@ use channel::{
     ApuChannel, FrameTrigger, TimerTrait,
 };
 
-use crate::common::{bus::Bus, interconnect::InterruptSignaler};
+use crate::common::{bus::Reset, interconnect::InterruptSignaler};
 
 pub trait ApuRegisters {
     fn write_ctrl(&mut self, channel: Channel, value: u8);
@@ -27,7 +27,7 @@ pub trait ApuRegisters {
 }
 
 #[derive(Debug)]
-pub struct APU {
+pub struct Apu {
     pulse1: Pulse,
     pulse2: Pulse,
     triangle: Triangle,
@@ -44,13 +44,13 @@ pub struct APU {
     pending_sequencer_mode: FrameCounterSequencerMode,
 }
 
-impl Default for APU {
+impl Default for Apu {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl APU {
+impl Apu {
     pub fn new() -> Self {
         Self {
             pulse1: Pulse::new(PulseChannel::One),
@@ -148,7 +148,7 @@ impl APU {
     }
 }
 
-impl ApuRegisters for APU {
+impl ApuRegisters for Apu {
     fn write_ctrl(&mut self, channel: Channel, value: u8) {
         match channel {
             Channel::Pulse1 => self.pulse1.write_ctrl(value),
@@ -236,7 +236,7 @@ impl ApuRegisters for APU {
     }
 }
 
-impl Bus for APU {
+impl Reset for Apu {
     fn reset(&mut self) {
         self.frame_cycle = 7;
 
@@ -245,25 +245,9 @@ impl Bus for APU {
         self.frame_interrupt_flag.set(false);
         self.frame_interrupt_flag_changed.set(true);
     }
-
-    fn read(&mut self, _address: u16) -> u8 {
-        0
-        // match register {
-        //     Ok(register) => self.read_register(register),
-        //     _ => panic!("Invalid APU register read: {address:04X}"),
-        // }
-    }
-
-    fn write(&mut self, _address: u16, _data: u8) {
-        // let register = address.try_into();
-        // match register {
-        //     Ok(register) => self.write_register(register, data),
-        //     _ => panic!("Invalid APU register write: {address:04X}"),
-        // }
-    }
 }
 
-impl InterruptSignaler for APU {
+impl InterruptSignaler for Apu {
     fn interrupt_status(&self) -> bool {
         self.frame_interrupt_flag.get()
     }
@@ -276,38 +260,6 @@ impl InterruptSignaler for APU {
         self.frame_interrupt_flag_changed.set(false);
         // TODO: clear dmc flag here too
     }
-}
-
-mem_mapped_registers! {
-enum Register {
-    Pulse1_1 = 0x4000,
-    Pulse1_2 = 0x4001,
-    Pulse1_3 = 0x4002,
-    Pulse1_4 = 0x4003,
-
-    Pulse2_1 = 0x4004,
-    Pulse2_2 = 0x4005,
-    Pulse2_3 = 0x4006,
-    Pulse2_4 = 0x4007,
-
-    Triangle1 = 0x4008,
-    Triangle2 = 0x4009, // unused
-    Triangle3 = 0x400a,
-    Triangle4 = 0x400b,
-
-    Noise1 = 0x400c,
-    Noise2 = 0x400d,    // unused
-    Noise3 = 0x400e,
-    Noise4 = 0x400f,
-
-    DMC1 = 0x4010,
-    DMC2 = 0x4011,
-    DMC3 = 0x4012,
-    DMC4 = 0x4013,
-
-    Status = 0x4015,
-    FrameCounter = 0x4017,
-}
 }
 
 #[derive(Debug, Default, PartialEq, Clone, Copy)]

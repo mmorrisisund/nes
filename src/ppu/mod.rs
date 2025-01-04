@@ -1,8 +1,8 @@
 use crate::common::interconnect::InterruptSignaler;
 
-pub struct PPU {}
+pub struct Ppu {}
 
-impl InterruptSignaler for PPU {
+impl InterruptSignaler for Ppu {
     fn interrupt_status(&self) -> bool {
         false
     }

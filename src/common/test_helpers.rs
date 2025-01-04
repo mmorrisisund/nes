@@ -1,13 +1,14 @@
 use crate::{
-    apu::APU,
+    apu::Apu,
+    bus::Bus,
     cartridge::Cartridge,
     common::{
-        bus::Bus,
+        bus::{MemAccess, Reset},
         interconnect::{InterruptSignaler, SignalProvider},
     },
     cpu::RunState,
-    nes::{MainBus, Nes},
-    ppu::PPU,
+    nes::Nes,
+    ppu::Ppu,
 };
 
 const STATUS_ADDR: u16 = 0x6000;
@@ -52,39 +53,19 @@ impl TestNes {
         }
     }
 
-    #[allow(dead_code)]
-    fn cpu_bus(&self) -> &MainBus {
-        self.nes.bus()
-    }
-
-    fn cpu_bus_mut(&mut self) -> &mut MainBus {
+    fn cpu_bus_mut(&mut self) -> &mut Bus {
         self.nes.bus_mut()
     }
 }
 
 pub struct TestBusRom {
     ram: [u8; 0x800],
-    apu: APU,
-    ppu: PPU,
+    apu: Apu,
+    ppu: Ppu,
     cartridge: Cartridge,
 }
 
-impl TestBusRom {
-    pub fn new(cartridge: Cartridge) -> Self {
-        Self {
-            ram: [0; 0x800],
-            apu: APU::default(),
-            ppu: PPU {},
-            cartridge,
-        }
-    }
-}
-
-impl Bus for TestBusRom {
-    fn reset(&mut self) {
-        self.apu.reset();
-    }
-
+impl MemAccess for TestBusRom {
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
@@ -95,6 +76,10 @@ impl Bus for TestBusRom {
         }
     }
 
+    fn peek(&self, _address: u16) -> u8 {
+        0
+    }
+
     fn write(&mut self, address: u16, data: u8) {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize] = data, // ram
@@ -103,6 +88,12 @@ impl Bus for TestBusRom {
             0x4018..0x4020 => {}                                           // unused
             0x4020.. => self.cartridge.write(address, data),               // cartridge
         }
+    }
+}
+
+impl Reset for TestBusRom {
+    fn reset(&mut self) {
+        self.apu.reset();
     }
 }
 

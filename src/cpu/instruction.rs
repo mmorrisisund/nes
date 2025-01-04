@@ -124,8 +124,7 @@ pub enum OpCode {
     Arr, // And #imm, then Ror A
     Axs, // ((A and X) - #imm) -> X
     Lax, // Load A and X [Lda + Tax]
-    Sax, // Store the value of (A and X)
-
+    // Sax, // Store the value of (A and X)
     Dcp, // Decrement memory, then Compare A [Dec + Cmp]
     Isc, // Increment memory, then Subtract with carry [Inc + Sbc]
     Rla, // Rotate left, then And [Rol + And]
@@ -234,7 +233,7 @@ impl Display for OpCode {
             Rra => "RRA",
             Isc => "ISC",
             Dcp => "DCP",
-            Sax => "SAX",
+            // Sax => "SAX",
             Lax => "LAX",
             Anc => "ANC",
             Alr => "ALR",

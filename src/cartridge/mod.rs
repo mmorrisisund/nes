@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
 
-use crate::common::bus::Bus;
+use crate::common::bus::{MemAccess, Reset};
 pub use error::CartridgeError;
 
 #[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
@@ -184,11 +184,13 @@ impl Cartridge {
     }
 }
 
-impl Bus for Cartridge {
+impl Reset for Cartridge {
     fn reset(&mut self) {
         todo!()
     }
+}
 
+impl MemAccess for Cartridge {
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => todo!(), // ppu
@@ -212,6 +214,10 @@ impl Bus for Cartridge {
                 }
             }
         }
+    }
+
+    fn peek(&self, _address: u16) -> u8 {
+        todo!()
     }
 
     fn write(&mut self, address: u16, data: u8) {
