@@ -118,27 +118,26 @@ pub enum OpCode {
     Txs, // Transfer x to sp
     Tya, // Transfer y to a
 
-    // Unofficial
+    // Unofficial [Mnemonic used from https://www.masswerk.at/6502/6502_instruction_set.html#illegals]
     Alr, // And #imm, then Lsr A
     Anc, // And #imm, then set Carry = Negative
+    Ane, // Transfer X to A, then And #imm [Txa + And #imm]
     Arr, // And #imm, then Ror A
-    Axs, // ((A and X) - #imm) -> X
-    Lax, // Load A and X [Lda + Tax]
-    // Sax, // Store the value of (A and X)
     Dcp, // Decrement memory, then Compare A [Dec + Cmp]
     Isc, // Increment memory, then Subtract with carry [Inc + Sbc]
+    Las, // Store the value of ({value in $addr} & (the stack pointer)) into A, X, and (the stack pointer)
+    Lax, // Load A and X [Lda + Tax]
+    Lxa, // And #imm -> X
     Rla, // Rotate left, then And [Rol + And]
     Rra, // Rotate right, then Add with carry [Ror + Adc]
-    Slo, // Arithmetic shift left, then OR [Asl + Ora]
-    Sre, // Logical shift right, then XOR [Lsr + Eor]
-
-    Atx, // And #imm -> X
-    Las, // Store the value of ({value in $addr} & (the stack pointer)) into A, X, and (the stack pointer)
-    Axa, // Store the value of (A and X and {High byte of $addr}) into $addr
+    Sax, // Store the value of (A and X)
+    Sbx, // ((A and X) - #imm) -> X
+    Sha, // Store the value of (A and X and {High byte of $addr}) into $addr
     Shx, // Store the value of (X and {High byte of $addr}) into $addr
     Shy, // Store the value of (Y and {High byte of $addr}) into $addr
+    Slo, // Arithmetic shift left, then OR [Asl + Ora]
+    Sre, // Logical shift right, then XOR [Lsr + Eor]
     Tas, // Store the value of (X and A) into (the stack pointer), and store ((the stack pointer) and {High byte of $addr}) into $addr
-    Xaa, // Transfer X to A, then And #imm [Txa + And #imm]
 
     Kil, // Halt the CPU (CRASH)
 }
@@ -155,7 +154,7 @@ impl OpCode {
             || self == &OpCode::Ror // read-modify-write instruction
 
             // unofficial
-            || self == &OpCode::Axa
+            || self == &OpCode::Sha
             || self == &OpCode::Dcp
             || self == &OpCode::Isc
             || self == &OpCode::Rla
@@ -233,15 +232,15 @@ impl Display for OpCode {
             Rra => "RRA",
             Isc => "ISC",
             Dcp => "DCP",
-            // Sax => "SAX",
+            Sax => "SAX",
             Lax => "LAX",
             Anc => "ANC",
             Alr => "ALR",
             Arr => "ARR",
-            Atx => "ATX",
-            Axs => "AXS",
-            Xaa => "XAA",
-            Axa => "AXA",
+            Lxa => "LXA",
+            Sbx => "SBX",
+            Ane => "ANE",
+            Sha => "SHA",
             Shy => "SHY",
             Shx => "SHX",
             Tas => "TAS",
@@ -314,11 +313,11 @@ const OPCODES: [OpCode; 256] = [
     Bvc, Eor, Kil, Sre, Nop, Eor, Lsr, Sre, Cli, Eor, Nop, Sre, Nop, Eor, Lsr, Sre, // 50
     Rts, Adc, Kil, Rra, Nop, Adc, Ror, Rra, Pla, Adc, Ror, Arr, Jmp, Adc, Ror, Rra, // 60
     Bvs, Adc, Kil, Rra, Nop, Adc, Ror, Rra, Sei, Adc, Nop, Rra, Nop, Adc, Ror, Rra, // 70
-    Nop, Sta, Nop, Axs, Sty, Sta, Stx, Axs, Dey, Nop, Txa, Xaa, Sty, Sta, Stx, Axs, // 80
-    Bcc, Sta, Kil, Axa, Sty, Sta, Stx, Axs, Tya, Sta, Txs, Tas, Shy, Sta, Shx, Axa, // 90
-    Ldy, Lda, Ldx, Lax, Ldy, Lda, Ldx, Lax, Tay, Lda, Tax, Atx, Ldy, Lda, Ldx, Lax, // A0
+    Nop, Sta, Nop, Sax, Sty, Sta, Stx, Sax, Dey, Nop, Txa, Ane, Sty, Sta, Stx, Sax, // 80
+    Bcc, Sta, Kil, Sha, Sty, Sta, Stx, Sax, Tya, Sta, Txs, Tas, Shy, Sta, Shx, Sha, // 90
+    Ldy, Lda, Ldx, Lax, Ldy, Lda, Ldx, Lax, Tay, Lda, Tax, Lxa, Ldy, Lda, Ldx, Lax, // A0
     Bcs, Lda, Kil, Lax, Ldy, Lda, Ldx, Lax, Clv, Lda, Tsx, Las, Ldy, Lda, Ldx, Lax, // B0
-    Cpy, Cmp, Nop, Dcp, Cpy, Cmp, Dec, Dcp, Iny, Cmp, Dex, Axs, Cpy, Cmp, Dec, Dcp, // C0
+    Cpy, Cmp, Nop, Dcp, Cpy, Cmp, Dec, Dcp, Iny, Cmp, Dex, Sbx, Cpy, Cmp, Dec, Dcp, // C0
     Bne, Cmp, Kil, Dcp, Nop, Cmp, Dec, Dcp, Cld, Cmp, Nop, Dcp, Nop, Cmp, Dec, Dcp, // D0
     Cpx, Sbc, Nop, Isc, Cpx, Sbc, Inc, Isc, Inx, Sbc, Nop, Sbc, Cpx, Sbc, Inc, Isc, // E0
     Beq, Sbc, Kil, Isc, Nop, Sbc, Inc, Isc, Sed, Sbc, Nop, Isc, Nop, Sbc, Inc, Isc, // F0

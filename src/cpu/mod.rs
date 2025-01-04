@@ -733,9 +733,8 @@ impl Cpu {
                     (self.reg_a >> 6 & 1) ^ (self.reg_a >> 5 & 1) != 0,
                 );
             }
-            Axs => {
-                let result = self.reg_a & self.reg_x;
-                self.bus.write(instruction.operand, result);
+            Sbx => {
+                self.bus.write(instruction.operand, self.reg_a & self.reg_x);
             }
             Lax => {
                 let data = self.bus.read(instruction.operand);
@@ -743,9 +742,9 @@ impl Cpu {
                 self.reg_x = data;
                 self.update_nz_flag(data);
             }
-            // Sax => {
-            //     self.bus.write(instruction.operand, self.reg_a & self.reg_x);
-            // }
+            Sax => {
+                self.bus.write(instruction.operand, self.reg_a & self.reg_x);
+            }
             Dcp => {
                 self.dec(instruction.operand);
                 self.run_cmp_operation(&instruction, self.reg_a);
@@ -771,7 +770,7 @@ impl Cpu {
                 self.eor(&instruction);
             }
 
-            Atx => {
+            Lxa => {
                 self.and(&instruction);
                 self.reg_x = self.reg_a;
             }
@@ -783,7 +782,7 @@ impl Cpu {
                 self.reg_x = result;
                 self.reg_sp = result;
             }
-            Axa => {
+            Sha => {
                 let hi = (instruction.operand >> 8) as u8;
                 let value = self.reg_a & self.reg_x & (hi + 1);
 
@@ -818,7 +817,7 @@ impl Cpu {
                 //       to ADDR_HI if page boundary is crossed.
                 self.bus.write(instruction.operand, value);
             }
-            Xaa => {
+            Ane => {
                 self.reg_a = self.reg_x;
                 self.and(&instruction);
             }
