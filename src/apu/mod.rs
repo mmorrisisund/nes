@@ -5,6 +5,7 @@ use std::{cell::Cell, cmp::Ordering};
 pub use channel::Channel;
 
 use channel::{
+    dmc::Dmc,
     noise::Noise,
     pulse::{Pulse, PulseChannel},
     triangle::Triangle,
@@ -19,6 +20,8 @@ pub trait ApuRegisters {
     fn write_timer_lo(&mut self, channel: Channel, value: u8);
     fn write_timer_hi(&mut self, channel: Channel, value: u8);
     fn write_length(&mut self, channel: Channel, value: u8);
+    fn write_dmc_output(&mut self, value: u8);
+    fn write_dmc_addr(&mut self, value: u8);
 
     fn read_status(&mut self) -> u8;
     fn peek_status(&self) -> u8;
@@ -32,6 +35,8 @@ pub struct Apu {
     pulse2: Pulse,
     triangle: Triangle,
     noise: Noise,
+    dmc: Dmc,
+    total_cycles: u64,
 
     frame_cycle: u16,
     frame_cycle_reset_delay: i8,
@@ -57,6 +62,8 @@ impl Apu {
             pulse2: Pulse::new(PulseChannel::Two),
             triangle: Triangle::new(),
             noise: Noise::new(),
+            dmc: Dmc::new(),
+            total_cycles: 0,
             frame_cycle: 5, // TODO: cpu has 7 cycle delay at start, must be odd!!??? or jitter test fails, if 0 both 4017 tests fail, if 1 4017 timing test fails
             frame_cycle_reset_delay: -1,
 
@@ -71,7 +78,7 @@ impl Apu {
 
     pub fn cycle_tick(&mut self) {
         self.frame_cycle += 1;
-
+        self.total_cycles += 1;
         match self.frame_cycle_reset_delay.cmp(&0) {
             Ordering::Less => {}
             Ordering::Equal => {
@@ -121,6 +128,14 @@ impl Apu {
         }
     }
 
+    pub fn dmc_read_request(&mut self) -> Option<u16> {
+        self.dmc.next_address()
+    }
+
+    pub fn dmc_write(&mut self, value: u8) {
+        self.dmc.set_sample_buffer(value);
+    }
+
     fn update_interrupt(&mut self) {
         if !self.interrupt_disabled {
             self.frame_interrupt_flag.set(true);
@@ -131,6 +146,9 @@ impl Apu {
     fn clock_timers(&mut self) {
         self.pulse1.clock();
         self.pulse2.clock();
+        self.triangle.clock();
+        self.noise.clock();
+        self.dmc.clock();
     }
 
     fn generate_quarter_frame_clock(&mut self) {
@@ -155,6 +173,7 @@ impl ApuRegisters for Apu {
             Channel::Pulse2 => self.pulse2.write_ctrl(value),
             Channel::Triangle => self.triangle.write_ctrl(value),
             Channel::Noise => self.noise.write_ctrl(value),
+            _ => panic!("{channel:?} does not have a control register"),
         }
     }
 
@@ -172,6 +191,7 @@ impl ApuRegisters for Apu {
             Channel::Pulse2 => self.pulse2.write_timer_lo(value),
             Channel::Triangle => self.triangle.write_timer_lo(value),
             Channel::Noise => self.noise.write_timer(value),
+            Channel::Dmc => self.dmc.write_timer(value),
         }
     }
 
@@ -187,6 +207,7 @@ impl ApuRegisters for Apu {
     fn write_length(&mut self, channel: Channel, value: u8) {
         match channel {
             Channel::Noise => self.noise.write_length(value),
+            Channel::Dmc => self.dmc.set_length(value),
             _ => panic!("{channel:?} does not have a length register"),
         }
     }
@@ -205,9 +226,13 @@ impl ApuRegisters for Apu {
         let pulse2_enabled = self.pulse2.enabled() as u8;
         let triangle_enabled = self.triangle.enabled() as u8;
         let noise_enabled = self.noise.enabled() as u8;
+        let dmc_enabled = self.dmc.enabled() as u8;
         let frame_interrupt = self.frame_interrupt_flag.get() as u8;
+        let dmc_interrupt = self.dmc.interrupt_status() as u8;
 
-        frame_interrupt << 6
+        dmc_interrupt << 7
+            | frame_interrupt << 6
+            | dmc_enabled << 4
             | noise_enabled << 3
             | triangle_enabled << 2
             | pulse2_enabled << 1
@@ -219,9 +244,9 @@ impl ApuRegisters for Apu {
         self.pulse2.set_enabled((value >> 1 & 0x1) != 0);
         self.triangle.set_enabled((value >> 2 & 0x1) != 0);
         self.noise.set_enabled((value >> 3 & 0x1) != 0);
+        self.dmc.set_enabled((value >> 4 & 0x1) != 0);
 
-        // TODO:  DMC channels
-        // TODO: clear DMC interrupt
+        self.dmc.clear_interrupt();
     }
 
     fn write_frame_counter(&mut self, value: u8) {
@@ -233,6 +258,14 @@ impl ApuRegisters for Apu {
             self.frame_interrupt_flag_changed.set(true);
         }
         self.frame_cycle_reset_delay = if self.frame_cycle % 2 == 0 { 3 } else { 2 };
+    }
+
+    fn write_dmc_output(&mut self, value: u8) {
+        self.dmc.set_output(value);
+    }
+
+    fn write_dmc_addr(&mut self, value: u8) {
+        self.dmc.set_address(value);
     }
 }
 
@@ -257,8 +290,9 @@ impl InterruptSignaler for Apu {
     }
 
     fn clear_interrupt(&mut self) {
+        // TODO: does the flag itself need set to false?
         self.frame_interrupt_flag_changed.set(false);
-        // TODO: clear dmc flag here too
+        self.dmc.clear_interrupt();
     }
 }
 
@@ -311,7 +345,6 @@ mod tests {
             execute_blargg_test("./src/test_roms/apu/reset/len_ctrs_enabled.nes");
         }
 
-        #[ignore = "channels/dmc need to be fully implemented"]
         #[test]
         fn works_immediately() {
             execute_blargg_test("./src/test_roms/apu/reset/works_immediately.nes");
@@ -351,10 +384,14 @@ mod tests {
             execute_blargg_test("./src/test_roms/apu/basics/rom_singles/6-irq_flag_timing.nes");
         }
 
-        #[ignore = "not implemented"]
         #[test]
         fn dmc_basics() {
             execute_blargg_test("./src/test_roms/apu/basics/rom_singles/7-dmc_basics.nes");
+        }
+
+        #[test]
+        fn dmc_rates() {
+            execute_blargg_test("./src/test_roms/apu/basics/rom_singles/8-dmc_rates.nes");
         }
     }
 }

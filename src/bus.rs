@@ -74,7 +74,10 @@ impl MemAccess for Bus {
             0x400d => {} // unused
             0x400e => self.apu.write_timer_lo(Channel::Noise, data),
             0x400f => self.apu.write_length(Channel::Noise, data),
-            0x4010..0x4014 => {}
+            0x4010 => self.apu.write_timer_lo(Channel::Dmc, data),
+            0x4011 => self.apu.write_dmc_output(data),
+            0x4012 => self.apu.write_dmc_addr(data),
+            0x4013 => self.apu.write_length(Channel::Dmc, data),
             0x4015 => self.apu.write_status(data),
             0x4017 => self.apu.write_frame_counter(data),
             0x4014 => {}                                     // ppu

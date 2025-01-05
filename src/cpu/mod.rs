@@ -97,6 +97,8 @@ impl Cpu {
     pub fn cycle_tick(&mut self) -> RunState {
         self.total_cycles += 1;
 
+        self.run_apu();
+
         if self.cycles_left == 0 && self.next_instruction.is_none() {
             if self.nmi_requested || (self.irq_requested) {
                 self.execute_interrupt(false);
@@ -117,15 +119,6 @@ impl Cpu {
         } else {
             self.cycles_left -= 1;
             RunState::Waiting
-        }
-    }
-
-    pub fn run_next_instruction(&mut self) -> RunState {
-        loop {
-            let state = self.cycle_tick();
-            if state != RunState::Waiting {
-                return state;
-            }
         }
     }
 
@@ -252,10 +245,6 @@ impl Cpu {
         let regs = format!("A:{a:02X} X:{x:02X} Y:{y:02X} P:{p:02X} SP:{s:02X} CYC:{c}");
 
         format!("{asm:47} {regs}")
-    }
-
-    pub fn bus(&self) -> &Bus {
-        &self.bus
     }
 
     pub fn bus_mut(&mut self) -> &mut Bus {
@@ -974,6 +963,15 @@ impl Cpu {
 
     fn ora(&mut self, instruction: &Instruction) {
         self.run_bitwise_operation(instruction, |a, b| a | b);
+    }
+
+    fn run_apu(&mut self) {
+        self.bus.apu.cycle_tick();
+
+        if let Some(addr) = self.bus.apu.dmc_read_request() {
+            let value = self.bus.read(addr);
+            self.bus.apu.dmc_write(value);
+        }
     }
 }
 

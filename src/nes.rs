@@ -34,7 +34,6 @@ impl Nes {
     }
 
     pub fn cycle_tick(&mut self) -> RunState {
-        self.cpu.bus_mut().apu.cycle_tick();
         self.cpu.cycle_tick()
     }
 
