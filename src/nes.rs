@@ -43,11 +43,6 @@ impl Nes {
         for _ in 0..29780 {
             self.clock_cycle();
         }
-
-        let samples = self.bus_mut().drain_audio_buffer();
-        self.audio_player.queue(&samples);
-
-        self.audio_player.play().unwrap();
     }
 
     pub fn clock_cycle(&mut self) -> RunState {
