@@ -28,6 +28,10 @@ impl Bus {
     pub fn load_cart(&mut self, cartridge: Cartridge) {
         self.cartridge = cartridge;
     }
+
+    pub fn drain_audio_buffer(&mut self) -> Vec<f32> {
+        self.apu.drain_audio_buffer()
+    }
 }
 
 impl Default for Bus {
@@ -44,7 +48,14 @@ impl MemAccess for Bus {
     fn read(&mut self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
-            0x2000..0x4000 => 0,                                    // ppu
+            0x2000..0x4000 => {
+                // TODO: just used for apu testing before ppu is done
+                if address == 0x2002 {
+                    0x80
+                } else {
+                    0
+                }
+            } // ppu
             0x4000..0x4014 | 0x4017 => 0,
             0x4015 => self.apu.read_status(),
             0x4014 => 0,                              // ppu

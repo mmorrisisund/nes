@@ -94,7 +94,7 @@ impl Cpu {
         self.fetch_next_instruction();
     }
 
-    pub fn cycle_tick(&mut self) -> RunState {
+    pub fn clock_cycle(&mut self) -> RunState {
         self.total_cycles += 1;
 
         self.run_apu();
@@ -343,10 +343,6 @@ impl Cpu {
     }
 
     fn execute_interrupt(&mut self, is_brk: bool) {
-        println!(
-            "interrupted - nmi: {}, irq: {}",
-            self.nmi_requested, self.irq_requested
-        );
         let pc = self.reg_pc;
         let lo = pc as u8;
         let hi = (pc >> 8) as u8;
@@ -501,19 +497,7 @@ impl Cpu {
 
         let mut state = RunState::NormalExecution;
         let instruction = self.next_instruction.take().unwrap();
-        // let operand_value = self.get_operand_value(&instruction); // this is dangerous, can cause side effects
-        // println!(
-        //     "pc: {:02X}, {}, a: {:02X} x: {:02X} m: {:02X}, cpu irq: {}, bus irq: {}, change requested: {}, irq disabled: {}",
-        //     self.reg_pc,
-        //     instruction.op_code,
-        //     self.reg_a,
-        //     self.reg_x,
-        //     operand_value,
-        //     self.irq_requested,
-        //     self.bus.interrupt_status(),
-        //     self.bus.interrupt_status_changed(),
-        //     self.is_set(StatusFlag::InterruptDisable)
-        // );
+
         // match opcode and perform action (some actions alter remaining cycle time, maybe)
         match instruction.op_code {
             // Access
@@ -576,7 +560,6 @@ impl Cpu {
             Ora => self.ora(&instruction),
             Bit => {
                 let data = self.bus.read(instruction.operand);
-
                 self.set_status(StatusFlag::Zero, self.reg_a & data == 0);
                 self.set_status(StatusFlag::Overflow, data & StatusFlag::Overflow as u8 != 0);
                 self.set_status(StatusFlag::Negative, data & StatusFlag::Negative as u8 != 0);
@@ -966,7 +949,7 @@ impl Cpu {
     }
 
     fn run_apu(&mut self) {
-        self.bus.apu.cycle_tick();
+        self.bus.apu.clock_cycle();
 
         if let Some(addr) = self.bus.apu.dmc_read_request() {
             let value = self.bus.read(addr);

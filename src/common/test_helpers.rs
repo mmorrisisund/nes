@@ -32,7 +32,7 @@ impl TestNes {
         let mut total_cycles = 0;
         loop {
             total_cycles += 1;
-            let state = self.nes.cycle_tick();
+            let state = self.nes.clock_cycle();
             if let RunState::NormalExecution = state {
                 // println!("{}", self.nes.cpu_trace());
             }
@@ -45,7 +45,7 @@ impl TestNes {
     fn cycle_until_mem_neq(&mut self, address: u16, value: u8) {
         // reminder: don't trace, alters apu register on read
         loop {
-            self.nes.cycle_tick();
+            self.nes.clock_cycle();
 
             if self.nes.bus_mut().read(address) != value {
                 return;

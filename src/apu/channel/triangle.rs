@@ -78,7 +78,10 @@ impl FrameTrigger for Triangle {
 
 impl TimerTrait for Triangle {
     fn clock(&mut self) {
-        if self.linear_counter.count() != 0 && self.length_counter.count() != 0 {
+        if self.timer.clock()
+            && self.linear_counter.count() != 0
+            && self.length_counter.count() != 0
+        {
             self.sequencer.clock();
         }
     }

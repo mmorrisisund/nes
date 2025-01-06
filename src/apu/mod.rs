@@ -14,6 +14,9 @@ use channel::{
 
 use crate::common::{bus::Reset, interconnect::InterruptSignaler};
 
+const CPU_FREQ: f32 = 1_789_773.0;
+const SAMPLE_RATE: f32 = 44_100.0;
+
 pub trait ApuRegisters {
     fn write_ctrl(&mut self, channel: Channel, value: u8);
     fn write_sweep(&mut self, channel: Channel, value: u8);
@@ -36,15 +39,17 @@ pub struct Apu {
     triangle: Triangle,
     noise: Noise,
     dmc: Dmc,
-    total_cycles: u64,
 
-    frame_cycle: u16,
-    frame_cycle_reset_delay: i8,
+    sample_period: f32,
+    sample_count: f32,
+    sample_buffer: Vec<f32>,
+
+    frame_count: u16,
+    frame_count_reset_delay: i8,
 
     frame_interrupt_flag: Cell<bool>, // Status read clears interrupt.  So interior mutability needed
     frame_interrupt_flag_changed: Cell<bool>, // Status read clears interrupt.  So interior mutability needed
-
-    interrupt_disabled: bool,
+    frame_interrupt_disabled: bool,
     sequencer_mode: FrameCounterSequencerMode,
     pending_sequencer_mode: FrameCounterSequencerMode,
 }
@@ -63,28 +68,32 @@ impl Apu {
             triangle: Triangle::new(),
             noise: Noise::new(),
             dmc: Dmc::new(),
-            total_cycles: 0,
-            frame_cycle: 5, // TODO: cpu has 7 cycle delay at start, must be odd!!??? or jitter test fails, if 0 both 4017 tests fail, if 1 4017 timing test fails
-            frame_cycle_reset_delay: -1,
 
+            sample_period: CPU_FREQ / SAMPLE_RATE,
+            sample_count: 0.,
+            sample_buffer: Vec::new(),
+
+            frame_count: 5, // TODO: cpu has 7 cycle delay at start, must be odd!!??? or jitter test fails, if 0 both 4017 tests fail, if 1 4017 timing test fails
+            frame_count_reset_delay: -1,
+
+            frame_interrupt_disabled: false,
             frame_interrupt_flag: Cell::new(false),
             frame_interrupt_flag_changed: Cell::new(false),
-
-            interrupt_disabled: false,
             sequencer_mode: FrameCounterSequencerMode::FourStep,
             pending_sequencer_mode: FrameCounterSequencerMode::FourStep,
         }
     }
 
-    pub fn cycle_tick(&mut self) {
-        self.frame_cycle += 1;
-        self.total_cycles += 1;
-        match self.frame_cycle_reset_delay.cmp(&0) {
+    pub fn clock_cycle(&mut self) {
+        self.frame_count += 1;
+        self.sample_count += 1.;
+
+        match self.frame_count_reset_delay.cmp(&0) {
             Ordering::Less => {}
             Ordering::Equal => {
-                self.frame_cycle_reset_delay -= 1;
+                self.frame_count_reset_delay -= 1;
 
-                self.frame_cycle = 0;
+                self.frame_count = 0;
                 self.sequencer_mode = self.pending_sequencer_mode;
 
                 if let FrameCounterSequencerMode::FiveStep = self.sequencer_mode {
@@ -92,14 +101,26 @@ impl Apu {
                     self.generate_half_frame_clock();
                 }
             }
-            Ordering::Greater => self.frame_cycle_reset_delay -= 1,
+            Ordering::Greater => self.frame_count_reset_delay -= 1,
+        }
+
+        if self.sample_count > self.sample_period {
+            self.sample_buffer.push(self.mixer_output());
+            self.sample_count = 0.;
         }
 
         self.clock_timers();
 
-        match self.frame_cycle {
+        // TODO: refactor this into separate struct
+        match self.frame_count {
+            7457 => {
+                self.generate_quarter_frame_clock();
+            }
             14913 => {
                 self.generate_half_frame_clock();
+            }
+            22371 => {
+                self.generate_quarter_frame_clock();
             }
             29828 => {
                 if self.sequencer_mode == FrameCounterSequencerMode::FourStep {
@@ -116,16 +137,20 @@ impl Apu {
             29830 if self.sequencer_mode == FrameCounterSequencerMode::FourStep => {
                 self.update_interrupt();
 
-                self.frame_cycle = 0;
+                self.frame_count = 0;
             }
             37281 => {
                 self.generate_half_frame_clock();
             }
             37282 => {
-                self.frame_cycle = 0;
+                self.frame_count = 0;
             }
             _ => {} //ignore
         }
+    }
+
+    pub fn drain_audio_buffer(&mut self) -> Vec<f32> {
+        self.sample_buffer.drain(..).collect()
     }
 
     pub fn dmc_read_request(&mut self) -> Option<u16> {
@@ -136,8 +161,29 @@ impl Apu {
         self.dmc.set_sample_buffer(value);
     }
 
+    fn mixer_output(&self) -> f32 {
+        let p1 = self.pulse1.get_output();
+        let p2 = self.pulse2.get_output();
+        let t = self.triangle.get_output();
+        let n = self.noise.get_output();
+        let d = self.dmc.get_output();
+
+        let p = if p1 == 0. && p2 == 0. {
+            0.
+        } else {
+            95.88 / ((8128. / (p1 + p2)) + 100.)
+        };
+
+        let tnd = if t == 0. && n == 0. && d == 0. {
+            0.
+        } else {
+            159.79 / (1. / ((t / 8227.) + (n / 12241.) + (d / 22638.)) + 100.)
+        };
+        p + tnd
+    }
+
     fn update_interrupt(&mut self) {
-        if !self.interrupt_disabled {
+        if !self.frame_interrupt_disabled {
             self.frame_interrupt_flag.set(true);
             self.frame_interrupt_flag_changed.set(true);
         }
@@ -251,13 +297,13 @@ impl ApuRegisters for Apu {
 
     fn write_frame_counter(&mut self, value: u8) {
         self.pending_sequencer_mode = value.into();
-        self.interrupt_disabled = value & (1 << 6) != 0;
+        self.frame_interrupt_disabled = value & (1 << 6) != 0;
 
-        if self.interrupt_disabled {
+        if self.frame_interrupt_disabled {
             self.frame_interrupt_flag.set(false);
             self.frame_interrupt_flag_changed.set(true);
         }
-        self.frame_cycle_reset_delay = if self.frame_cycle % 2 == 0 { 3 } else { 2 };
+        self.frame_count_reset_delay = if self.frame_count % 2 == 0 { 3 } else { 2 };
     }
 
     fn write_dmc_output(&mut self, value: u8) {
@@ -271,7 +317,7 @@ impl ApuRegisters for Apu {
 
 impl Reset for Apu {
     fn reset(&mut self) {
-        self.frame_cycle = 7;
+        self.frame_count = 7;
 
         self.write_status(0x00);
 

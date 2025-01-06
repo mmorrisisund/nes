@@ -23,7 +23,7 @@ impl Noise {
     }
 
     pub fn write_ctrl(&mut self, value: u8) {
-        self.length_counter.set_halt((value & 0x80) != 0);
+        self.length_counter.set_halt((value & 0x20) != 0);
         self.envelope.set_parameters(value);
     }
 
