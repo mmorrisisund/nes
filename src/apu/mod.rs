@@ -1,6 +1,6 @@
 mod channel;
 
-use std::{cell::Cell, cmp::Ordering};
+use std::cmp::Ordering;
 
 pub use channel::Channel;
 
@@ -47,8 +47,7 @@ pub struct Apu {
     frame_count: u16,
     frame_count_reset_delay: i8,
 
-    frame_interrupt_flag: Cell<bool>, // Status read clears interrupt.  So interior mutability needed
-    frame_interrupt_flag_changed: Cell<bool>, // Status read clears interrupt.  So interior mutability needed
+    frame_interrupt_flag: bool,
     frame_interrupt_disabled: bool,
     sequencer_mode: FrameCounterSequencerMode,
     pending_sequencer_mode: FrameCounterSequencerMode,
@@ -77,8 +76,7 @@ impl Apu {
             frame_count_reset_delay: -1,
 
             frame_interrupt_disabled: false,
-            frame_interrupt_flag: Cell::new(false),
-            frame_interrupt_flag_changed: Cell::new(false),
+            frame_interrupt_flag: false,
             sequencer_mode: FrameCounterSequencerMode::FourStep,
             pending_sequencer_mode: FrameCounterSequencerMode::FourStep,
         }
@@ -124,18 +122,18 @@ impl Apu {
             }
             29828 => {
                 if self.sequencer_mode == FrameCounterSequencerMode::FourStep {
-                    self.update_interrupt();
+                    self.raise_interrupt();
                 }
             }
             29829 => {
                 if self.sequencer_mode == FrameCounterSequencerMode::FourStep {
                     self.generate_half_frame_clock();
 
-                    self.update_interrupt();
+                    self.raise_interrupt();
                 }
             }
             29830 if self.sequencer_mode == FrameCounterSequencerMode::FourStep => {
-                self.update_interrupt();
+                self.raise_interrupt();
 
                 self.frame_count = 0;
             }
@@ -182,10 +180,9 @@ impl Apu {
         p + tnd
     }
 
-    fn update_interrupt(&mut self) {
+    fn raise_interrupt(&mut self) {
         if !self.frame_interrupt_disabled {
-            self.frame_interrupt_flag.set(true);
-            self.frame_interrupt_flag_changed.set(true);
+            self.frame_interrupt_flag = true;
         }
     }
 
@@ -261,8 +258,7 @@ impl ApuRegisters for Apu {
     fn read_status(&mut self) -> u8 {
         let status = self.peek_status();
 
-        self.frame_interrupt_flag.set(false);
-        self.frame_interrupt_flag_changed.set(true);
+        self.frame_interrupt_flag = false;
 
         status
     }
@@ -273,7 +269,7 @@ impl ApuRegisters for Apu {
         let triangle_enabled = self.triangle.enabled() as u8;
         let noise_enabled = self.noise.enabled() as u8;
         let dmc_enabled = self.dmc.enabled() as u8;
-        let frame_interrupt = self.frame_interrupt_flag.get() as u8;
+        let frame_interrupt = self.frame_interrupt_flag as u8;
         let dmc_interrupt = self.dmc.interrupt_status() as u8;
 
         dmc_interrupt << 7
@@ -300,8 +296,7 @@ impl ApuRegisters for Apu {
         self.frame_interrupt_disabled = value & (1 << 6) != 0;
 
         if self.frame_interrupt_disabled {
-            self.frame_interrupt_flag.set(false);
-            self.frame_interrupt_flag_changed.set(true);
+            self.frame_interrupt_flag = false;
         }
         self.frame_count_reset_delay = if self.frame_count % 2 == 0 { 3 } else { 2 };
     }
@@ -321,23 +316,16 @@ impl Reset for Apu {
 
         self.write_status(0x00);
 
-        self.frame_interrupt_flag.set(false);
-        self.frame_interrupt_flag_changed.set(true);
+        self.frame_interrupt_flag = false;
     }
 }
 
 impl InterruptSignaler for Apu {
     fn interrupt_status(&self) -> bool {
-        self.frame_interrupt_flag.get()
-    }
-
-    fn interrupt_status_changed(&self) -> bool {
-        self.frame_interrupt_flag_changed.get()
+        self.frame_interrupt_flag
     }
 
     fn clear_interrupt(&mut self) {
-        // TODO: does the flag itself need set to false?
-        self.frame_interrupt_flag_changed.set(false);
         self.dmc.clear_interrupt();
     }
 }

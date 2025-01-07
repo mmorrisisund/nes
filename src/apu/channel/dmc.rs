@@ -26,7 +26,6 @@ pub struct Dmc {
 
     irq_enabled: bool,
     interrupt_flag: bool,
-    interrupt_flag_changed: bool,
 }
 
 impl Dmc {
@@ -47,7 +46,6 @@ impl Dmc {
 
         if !self.irq_enabled {
             self.interrupt_flag = false;
-            self.interrupt_flag_changed = true;
         }
     }
 
@@ -65,7 +63,6 @@ impl Dmc {
 
     pub fn clear_interrupt(&mut self) {
         self.interrupt_flag = false;
-        self.interrupt_flag_changed = true;
     }
 
     pub fn next_address(&mut self) -> Option<u16> {
@@ -93,7 +90,6 @@ impl Dmc {
                 self.bytes_remaining = self.sample_length;
             } else if self.irq_enabled {
                 self.interrupt_flag = true;
-                self.interrupt_flag_changed = true;
             }
         }
     }
@@ -151,12 +147,7 @@ impl InterruptSignaler for Dmc {
         self.interrupt_flag
     }
 
-    fn interrupt_status_changed(&self) -> bool {
-        self.interrupt_flag_changed
-    }
-
     fn clear_interrupt(&mut self) {
         self.interrupt_flag = false;
-        self.interrupt_flag_changed = true;
     }
 }

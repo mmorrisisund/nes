@@ -18,7 +18,6 @@ const RESET_NEEDED: u8 = 0x81;
 
 struct TestNes {
     nes: Nes,
-    // cpu: CPU<TestBusRom>,
 }
 
 impl TestNes {
@@ -106,12 +105,8 @@ impl SignalProvider for TestBusRom {
         self.ppu.clear_interrupt();
     }
 
-    fn interrupt_status(&self) -> bool {
+    fn interrupt_requested(&self) -> bool {
         self.apu.interrupt_status()
-    }
-
-    fn interrupt_status_changed(&self) -> bool {
-        self.apu.interrupt_status_changed()
     }
 
     fn clear_interrupt(&mut self) {
@@ -127,14 +122,10 @@ fn create_test_nes(file_path: &str) -> TestNes {
 pub fn execute_blargg_test(file_path: &str) {
     let mut nes = create_test_nes(file_path);
 
-    // nes.reset();
-
     nes.cycle_until_infinite();
     nes.cycle_until_mem_neq(STATUS_ADDR, TEST_RUNNING);
 
-    // let mut status = ;
     while nes.cpu_bus_mut().read(STATUS_ADDR) == RESET_NEEDED {
-        println!("reset performed");
         nes.reset();
 
         nes.cycle_until_infinite();

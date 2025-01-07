@@ -114,15 +114,11 @@ impl SignalProvider for Bus {
         self.ppu.clear_interrupt();
     }
 
-    fn interrupt_status(&self) -> bool {
+    fn interrupt_requested(&self) -> bool {
         self.apu.interrupt_status()
     }
 
-    fn interrupt_status_changed(&self) -> bool {
-        self.apu.interrupt_status_changed()
-    }
-
     fn clear_interrupt(&mut self) {
-        // self.apu.clear_interrupt();
+        self.apu.clear_interrupt();
     }
 }
