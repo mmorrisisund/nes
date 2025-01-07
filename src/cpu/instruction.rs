@@ -269,12 +269,6 @@ pub enum AddressingMode {
 }
 
 impl AddressingMode {
-    // fn can_cross_page(&self) -> bool {
-    //     self == &AddressingMode::AbsoluteX
-    //         || self == &AddressingMode::AbsoluteY
-    //         || self == &AddressingMode::IndirectIndexed
-    // }
-
     fn instruction_length(&self) -> usize {
         match self {
             Implied => 1,

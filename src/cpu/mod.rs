@@ -155,34 +155,28 @@ impl Cpu {
             instruction::AddressingMode::Accumulator => "A".to_string(),
             instruction::AddressingMode::ZeroPage => {
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
+
                 format!("${addr:02X} = {value:02X}")
             }
             instruction::AddressingMode::ZeroPageX => {
                 let base = instruction.raw_operand;
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = if addr == 0x4015 {
-                    0
-                } else {
-                    self.bus.read(addr)
-                };
+                let value = self.bus.peek(addr);
 
                 format!("${base:02X},X @ {addr:02X} = {value:02X}")
             }
             instruction::AddressingMode::ZeroPageY => {
                 let base = instruction.raw_operand;
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
 
                 format!("${base:02X},Y @ {addr:02X} = {value:02X}")
             }
             instruction::AddressingMode::Absolute => {
                 let addr = instruction.raw_operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
+
                 match instruction.op_code {
                     OpCode::Jmp | OpCode::Jsr => format!("${addr:04X}"),
                     _ => format!("${addr:04X} = {value:02X}"),
@@ -191,16 +185,14 @@ impl Cpu {
             instruction::AddressingMode::AbsoluteX => {
                 let base = instruction.raw_operand;
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
 
                 format!("${base:04X},X @ {addr:04X} = {value:02X}")
             }
             instruction::AddressingMode::AbsoluteY => {
                 let base = instruction.raw_operand;
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
 
                 format!("${base:04X},Y @ {addr:04X} = {value:02X}")
             }
@@ -214,21 +206,19 @@ impl Cpu {
                 let base = instruction.raw_operand as u8;
                 let ptr = base.wrapping_add(self.reg_x);
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
 
                 format!("(${base:02X},X) @ {ptr:02X} = {addr:04X} = {value:02X}")
             }
             instruction::AddressingMode::IndirectIndexed => {
                 let base = instruction.raw_operand;
 
-                let lo = self.bus.read(base) as u16;
-                let hi = self.bus.read((base + 1) & 0xff) as u16;
+                let lo = self.bus.peek(base) as u16;
+                let hi = self.bus.peek((base + 1) & 0xff) as u16;
                 let ptr = (hi << 8) | lo;
 
                 let addr = instruction.operand;
-                // let value = self.bus.read(addr);
-                let value = 0;
+                let value = self.bus.peek(addr);
 
                 format!("(${base:02X}),Y = {ptr:04X} @ {addr:04X} = {value:02X}")
             }
@@ -306,7 +296,6 @@ impl Cpu {
         self.set_status(StatusFlag::Carry, result & 0xff00 == 0);
     }
 
-    // returns (cycle adjustment, run state)
     fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> RunState {
         // TODO: Remove cycles and return value
         let pc_start = self.reg_pc.wrapping_sub(2);
@@ -374,8 +363,8 @@ impl Cpu {
     }
 
     fn check_for_interrupt_request(&mut self) {
-        if self.bus.interrupt_status_changed() && !self.is_set(StatusFlag::InterruptDisable) {
-            self.irq_requested = self.bus.interrupt_status();
+        if self.bus.interrupt_requested() && !self.is_set(StatusFlag::InterruptDisable) {
+            self.irq_requested = self.bus.interrupt_requested();
             self.bus.clear_interrupt();
         }
 
@@ -384,14 +373,6 @@ impl Cpu {
             self.bus.clear_nmi();
         }
     }
-
-    // fn force_interrupt_request_update(&mut self) {
-    //     self.irq_requested = self.bus.interrupt_status();
-    //     self.bus.clear_interrupt();
-
-    //     // self.nmi_requested = true;
-    //     // self.bus.clear_nmi();
-    // }
 
     fn fetch_next_instruction(&mut self) {
         let opcode = self.bus.read(self.reg_pc);
@@ -405,10 +386,7 @@ impl Cpu {
 
         match len {
             2 => operand |= self.bus.read(self.reg_pc) as u16,
-            3 => {
-                operand |= self.bus.read(self.reg_pc) as u16;
-                operand |= (self.bus.read(self.reg_pc + 1) as u16) << 8;
-            }
+            3 => operand |= self.bus.read_u16(self.reg_pc),
             _ => {}
         }
         self.reg_pc += (len - 1) as u16;
@@ -695,8 +673,6 @@ impl Cpu {
             Arr => {
                 self.and(&instruction);
 
-                // let mut ror_ins = instruction.clone();
-                // ror_ins.operand.is_address = false;  // this might already be false based on addressing mode
                 self.ror(&instruction);
 
                 self.set_status(StatusFlag::Carry, (self.reg_a >> 6) & 1 != 0);
@@ -961,74 +937,7 @@ impl Cpu {
 #[cfg(test)]
 mod tests {
 
-    use crate::common::{
-        // bus::{MemReader, MemWriter, Reset},
-        test_helpers::execute_blargg_test,
-    };
-
-    // use super::*;
-
-    // struct TestBusBin {
-    //     data: [u8; 0x10000],
-    //     apu: APU,
-    //     ppu: PPU,
-    // }
-
-    // impl TestBusBin {
-    //     pub fn new(data: [u8; 0x10000]) -> Self {
-    //         Self {
-    //             data,
-    //             apu: APU::default(),
-    //             ppu: PPU {},
-    //         }
-    //     }
-    // }
-
-    // impl Reset for TestBusBin {
-    //     fn reset(&mut self) {}
-    // }
-
-    // impl MemReader for TestBusBin {
-    //     fn read(&mut self, address: u16) -> u8 {
-    //         self.data[address as usize]
-    //     }
-
-    //     fn peek(&self, _address: u16) -> u8 {
-    //         todo!()
-    //     }
-    // }
-
-    // impl MemWriter for TestBusBin {
-    //     fn write(&mut self, address: u16, data: u8) {
-    //         match address {
-    //             0x0002 | 0x0003 => println!("write: {data:02X}"),
-    //             _ => {}
-    //         }
-    //         self.data[address as usize] = data;
-    //     }
-    // }
-
-    // impl SignalProvider for TestBusBin {
-    //     fn nmi_requested(&self) -> bool {
-    //         self.ppu.interrupt_status()
-    //     }
-
-    //     fn clear_nmi(&mut self) {
-    //         self.ppu.clear_interrupt();
-    //     }
-
-    //     fn interrupt_status(&self) -> bool {
-    //         self.apu.interrupt_status()
-    //     }
-
-    //     fn interrupt_status_changed(&self) -> bool {
-    //         self.apu.interrupt_status_changed()
-    //     }
-
-    //     fn clear_interrupt(&mut self) {
-    //         self.apu.clear_interrupt();
-    //     }
-    // }
+    use crate::common::test_helpers::execute_blargg_test;
 
     #[cfg(target_arch = "wasm32")] // using this to disable this test
     mod functional {

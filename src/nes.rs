@@ -3,16 +3,10 @@ use std::path::Path;
 use dynwave::AudioPlayer;
 
 use crate::{
-    // apu::{ApuRegisters, Channel, APU},
     bus::Bus,
     cartridge::{Cartridge, CartridgeError},
-    common::{
-        // bus::{MemReader, MemWriter, Reset},
-        bus::Reset,
-        // interconnect::{InterruptSignaler, SignalProvider},
-    },
+    common::bus::Reset,
     cpu::{Cpu, RunState},
-    // ppu::PPU,
 };
 
 pub struct Nes {
@@ -49,6 +43,7 @@ impl Nes {
         self.cpu.clock_cycle()
     }
 
+    #[allow(dead_code)]
     pub fn cpu_trace(&mut self) -> String {
         self.cpu.trace()
     }
