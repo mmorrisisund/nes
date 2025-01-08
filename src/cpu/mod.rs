@@ -6,6 +6,8 @@ use crate::bus::Bus;
 use crate::common::interconnect::SignalProvider;
 use crate::common::mem::MemAccess;
 
+const RUN_TRACE: bool = true;
+
 const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;
 const IRQ_VECTOR_ADDRESS: u16 = 0xfffe;
@@ -95,6 +97,8 @@ impl Cpu {
     }
 
     pub fn clock_cycle(&mut self) -> RunState {
+        self.trace();
+
         self.total_cycles += 1;
 
         self.run_apu();
@@ -122,11 +126,11 @@ impl Cpu {
         }
     }
 
-    pub fn trace(&mut self) -> String {
-        // FIXME: Can trace not affect the state of the cpu???
-        if self.next_instruction.is_none() {
-            self.fetch_next_instruction();
+    pub fn trace(&mut self) {
+        if !RUN_TRACE || self.next_instruction.is_none() || self.cycles_left != 1 {
+            return;
         }
+
         let instruction = self.next_instruction.as_ref().unwrap().clone();
 
         let pc = self.reg_pc - instruction.get_instruction_len() as u16;
@@ -235,7 +239,7 @@ impl Cpu {
         let c = self.total_cycles;
         let regs = format!("A:{a:02X} X:{x:02X} Y:{y:02X} P:{p:02X} SP:{s:02X} CYC:{c}");
 
-        format!("{asm:47} {regs}")
+        println!("{asm:47} {regs}")
     }
 
     pub fn bus_mut(&mut self) -> &mut Bus {
