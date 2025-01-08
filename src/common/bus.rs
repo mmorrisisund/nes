@@ -18,13 +18,6 @@ pub trait MemAccess {
     }
 
     fn write(&mut self, address: u16, data: u8);
-
-    fn write_u16(&mut self, address: u16, data: u16) {
-        let [lo, hi] = u16::to_le_bytes(data);
-
-        self.write(address, lo);
-        self.write(address.wrapping_add(1), hi);
-    }
 }
 
 pub trait Reset {

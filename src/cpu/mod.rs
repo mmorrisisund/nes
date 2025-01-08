@@ -135,8 +135,7 @@ impl Cpu {
         let operands = match instruction.get_instruction_len() {
             2 => format!("{:02X}", instruction.raw_operand as u8),
             3 => {
-                let lo = (instruction.raw_operand & 0xff) as u8;
-                let hi = (instruction.raw_operand >> 8 & 0xff) as u8;
+                let [lo, hi] = u16::to_le_bytes(instruction.raw_operand);
                 format!("{:02X} {:02X}", lo, hi)
             }
             _ => String::new(),
@@ -213,9 +212,11 @@ impl Cpu {
             instruction::AddressingMode::IndirectIndexed => {
                 let base = instruction.raw_operand;
 
-                let lo = self.bus.peek(base) as u16;
-                let hi = self.bus.peek((base + 1) & 0xff) as u16;
-                let ptr = (hi << 8) | lo;
+                // let lo = self.bus.peek(base) as u16;
+                // let hi = self.bus.peek((base + 1) & 0xff) as u16;
+                // let ptr = (hi << 8) | lo;
+                let [lo, hi] = u16::to_le_bytes(self.bus.peek_u16(base));
+                let ptr = u16::from_le_bytes([lo, hi]);
 
                 let addr = instruction.operand;
                 let value = self.bus.peek(addr);
