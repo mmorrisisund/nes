@@ -12,7 +12,7 @@ use channel::{
     ApuChannel, FrameTrigger, TimerTrait,
 };
 
-use crate::common::{bus::Reset, interconnect::InterruptSignaler};
+use crate::common::{mem::Reset, interconnect::InterruptSignaler};
 
 const CPU_FREQ: f32 = 1_789_773.0;
 const SAMPLE_RATE: f32 = 44_100.0;

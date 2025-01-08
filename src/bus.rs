@@ -2,7 +2,7 @@ use crate::{
     apu::{Apu, ApuRegisters, Channel},
     cartridge::Cartridge,
     common::{
-        bus::{MemAccess, Reset},
+        mem::{MemAccess, Reset},
         interconnect::{InterruptSignaler, SignalProvider},
     },
     ppu::Ppu,

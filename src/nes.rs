@@ -5,7 +5,7 @@ use dynwave::AudioPlayer;
 use crate::{
     bus::Bus,
     cartridge::{Cartridge, CartridgeError},
-    common::bus::Reset,
+    common::mem::Reset,
     cpu::{Cpu, RunState},
 };
 

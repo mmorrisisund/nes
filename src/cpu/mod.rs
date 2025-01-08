@@ -3,8 +3,8 @@ pub mod instruction;
 use instruction::{Instruction, OpCode};
 
 use crate::bus::Bus;
-use crate::common::bus::MemAccess;
 use crate::common::interconnect::SignalProvider;
+use crate::common::mem::MemAccess;
 
 const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;

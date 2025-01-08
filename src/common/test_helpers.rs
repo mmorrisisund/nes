@@ -3,7 +3,7 @@ use crate::{
     bus::Bus,
     cartridge::Cartridge,
     common::{
-        bus::{MemAccess, Reset},
+        mem::{MemAccess, Reset},
         interconnect::{InterruptSignaler, SignalProvider},
     },
     cpu::RunState,

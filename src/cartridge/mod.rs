@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
 
-use crate::common::bus::{MemAccess, Reset};
+use crate::common::mem::{MemAccess, Reset};
 pub use error::CartridgeError;
 
 #[allow(dead_code)] // TODO: Remove once ppu/mappers implemented

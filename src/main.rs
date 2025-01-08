@@ -6,7 +6,7 @@ mod cpu;
 mod nes;
 mod ppu;
 
-use common::bus::MemAccess;
+use common::mem::MemAccess;
 use nes::Nes;
 
 fn main() {
