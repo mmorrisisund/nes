@@ -6,7 +6,7 @@ use crate::bus::Bus;
 use crate::common::interconnect::SignalProvider;
 use crate::common::mem::MemAccess;
 
-const RUN_TRACE: bool = true;
+const RUN_TRACE: bool = false;
 
 const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;
@@ -97,14 +97,14 @@ impl Cpu {
     }
 
     pub fn clock_cycle(&mut self) -> RunState {
-        self.trace();
-
         self.total_cycles += 1;
+
+        self.trace();
 
         self.run_apu();
 
         if self.cycles_left == 0 && self.next_instruction.is_none() {
-            if self.nmi_requested || (self.irq_requested) {
+            if self.nmi_requested || self.irq_requested {
                 self.execute_interrupt(false);
                 RunState::StartInterrupt
             } else {
@@ -302,7 +302,6 @@ impl Cpu {
     }
 
     fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> RunState {
-        // TODO: Remove cycles and return value
         let pc_start = self.reg_pc.wrapping_sub(2);
 
         if condition {
@@ -337,10 +336,7 @@ impl Cpu {
     }
 
     fn execute_interrupt(&mut self, is_brk: bool) {
-        let pc = self.reg_pc;
-        let lo = pc as u8;
-        let hi = (pc >> 8) as u8;
-
+        let [lo, hi] = u16::to_le_bytes(self.reg_pc);
         self.push_stack(hi);
         self.push_stack(lo);
 
@@ -348,7 +344,6 @@ impl Cpu {
             self.nmi_requested = false;
             NMI_VECTOR_ADDRESS
         } else {
-            self.bus.clear_interrupt();
             self.irq_requested = false;
             IRQ_VECTOR_ADDRESS
         };
@@ -369,14 +364,10 @@ impl Cpu {
 
     fn check_for_interrupt_request(&mut self) {
         if self.bus.interrupt_requested() && !self.is_set(StatusFlag::InterruptDisable) {
-            self.irq_requested = self.bus.interrupt_requested();
-            self.bus.clear_interrupt();
+            self.irq_requested = true;
         }
 
-        if self.bus.nmi_requested() {
-            self.nmi_requested = true;
-            self.bus.clear_nmi();
-        }
+        self.nmi_requested = self.bus.nmi_requested();
     }
 
     fn fetch_next_instruction(&mut self) {
@@ -722,7 +713,6 @@ impl Cpu {
                 self.lsr(&instruction);
                 self.eor(&instruction);
             }
-
             Lxa => {
                 self.and(&instruction);
                 self.reg_x = self.reg_a;

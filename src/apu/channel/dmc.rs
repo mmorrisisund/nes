@@ -146,8 +146,4 @@ impl InterruptSignaler for Dmc {
     fn interrupt_status(&self) -> bool {
         self.interrupt_flag
     }
-
-    fn clear_interrupt(&mut self) {
-        self.interrupt_flag = false;
-    }
 }

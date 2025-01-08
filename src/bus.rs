@@ -2,8 +2,8 @@ use crate::{
     apu::{Apu, ApuRegisters, Channel},
     cartridge::Cartridge,
     common::{
-        mem::{MemAccess, Reset},
         interconnect::{InterruptSignaler, SignalProvider},
+        mem::{MemAccess, Reset},
     },
     ppu::Ppu,
 };
@@ -41,8 +41,24 @@ impl Default for Bus {
 }
 
 impl MemAccess for Bus {
-    fn peek(&self, _address: u16) -> u8 {
-        todo!()
+    fn peek(&self, address: u16) -> u8 {
+        match address {
+            0x0000..0x2000 => self.ram[(address & 0x7ff) as usize], // ram
+            0x2000..0x4000 => {
+                // TODO: just used for apu testing before ppu is done
+                if address == 0x2002 {
+                    0x80
+                } else {
+                    0
+                }
+            } // ppu
+            0x4000..0x4014 | 0x4017 => 0,
+            0x4015 => self.apu.peek_status(),
+            0x4014 => 0,                              // ppu
+            0x4016 => 0,                              // controller
+            0x4018..0x4020 => 0,                      // unused (test mode)
+            0x4020.. => self.cartridge.peek(address), // cartridge
+        }
     }
 
     fn read(&mut self, address: u16) -> u8 {
@@ -110,15 +126,7 @@ impl SignalProvider for Bus {
         self.ppu.interrupt_status()
     }
 
-    fn clear_nmi(&mut self) {
-        self.ppu.clear_interrupt();
-    }
-
     fn interrupt_requested(&self) -> bool {
         self.apu.interrupt_status()
-    }
-
-    fn clear_interrupt(&mut self) {
-        self.apu.clear_interrupt();
     }
 }

@@ -3,8 +3,8 @@ use crate::{
     bus::Bus,
     cartridge::Cartridge,
     common::{
-        mem::{MemAccess, Reset},
         interconnect::{InterruptSignaler, SignalProvider},
+        mem::{MemAccess, Reset},
     },
     cpu::RunState,
     nes::Nes,
@@ -101,16 +101,8 @@ impl SignalProvider for TestBusRom {
         self.ppu.interrupt_status()
     }
 
-    fn clear_nmi(&mut self) {
-        self.ppu.clear_interrupt();
-    }
-
     fn interrupt_requested(&self) -> bool {
         self.apu.interrupt_status()
-    }
-
-    fn clear_interrupt(&mut self) {
-        self.apu.clear_interrupt();
     }
 }
 

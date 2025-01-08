@@ -192,6 +192,10 @@ impl Reset for Cartridge {
 
 impl MemAccess for Cartridge {
     fn read(&mut self, address: u16) -> u8 {
+        self.peek(address)
+    }
+
+    fn peek(&self, address: u16) -> u8 {
         match address {
             0x0000..0x2000 => todo!(), // ppu
             0x2000..0x6000 => unreachable!(),
@@ -214,10 +218,6 @@ impl MemAccess for Cartridge {
                 }
             }
         }
-    }
-
-    fn peek(&self, _address: u16) -> u8 {
-        todo!()
     }
 
     fn write(&mut self, address: u16, data: u8) {

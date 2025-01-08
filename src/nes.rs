@@ -43,11 +43,6 @@ impl Nes {
         self.cpu.clock_cycle()
     }
 
-    #[allow(dead_code)]
-    pub fn cpu_trace(&mut self) -> String {
-        self.cpu.trace()
-    }
-
     pub fn bus_mut(&mut self) -> &mut Bus {
         self.cpu.bus_mut()
     }
