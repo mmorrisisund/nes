@@ -95,7 +95,7 @@ impl Cpu {
 
         if self.cycles_left == 0 && self.next_instruction.is_none() {
             if let Some(int) = self.interrupt.take() {
-                self.execute_interrupt(int, false);
+                self.execute_interrupt(int);
                 RunState::StartInterrupt
             } else {
                 self.fetch_next_instruction();
@@ -236,102 +236,6 @@ impl Cpu {
 
 // Private
 impl Cpu {
-    fn update_nz_flag(&mut self, result: u8) {
-        self.reg_status.set_zero(result);
-        self.reg_status.set_negative(result);
-    }
-
-    fn get_operand_value(&mut self, instruction: &Instruction) -> u8 {
-        if instruction.operand_is_address() {
-            self.bus.read(instruction.operand)
-        } else {
-            instruction.operand as u8
-        }
-    }
-
-    fn run_bitwise_operation<F>(&mut self, instruction: &Instruction, operation: F)
-    where
-        F: Fn(u8, u8) -> u8,
-    {
-        let operand_value = self.get_operand_value(instruction);
-        let result = operation(self.reg_a, operand_value);
-
-        self.update_nz_flag(result);
-        self.reg_a = result;
-    }
-
-    fn run_cmp_operation(&mut self, instruction: &Instruction, register_value: u8) {
-        let operand_value = self.get_operand_value(instruction);
-        let result = (register_value as u16).wrapping_sub(operand_value as u16);
-
-        self.update_nz_flag(result as u8);
-        self.reg_status.set(Status::CARRY, result & 0xff00 == 0);
-    }
-
-    fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> RunState {
-        let pc_start = self.reg_pc.wrapping_sub(2);
-
-        if condition {
-            if !on_same_page(self.reg_pc, new_addr) {
-                self.cycles_left += 1;
-            }
-            self.reg_pc = new_addr;
-            self.cycles_left += 1;
-        }
-
-        if condition && pc_start == new_addr {
-            RunState::InfiniteLoop(pc_start)
-        } else {
-            RunState::NormalExecution
-        }
-    }
-
-    fn run_load_instruction(&mut self, instruction: &Instruction) -> u8 {
-        let operand_value = self.get_operand_value(instruction);
-        self.update_nz_flag(operand_value);
-        operand_value
-    }
-
-    fn push_stack(&mut self, data: u8) {
-        self.bus.write(STACK_PAGE | self.reg_sp as u16, data);
-        self.reg_sp = self.reg_sp.wrapping_sub(1);
-    }
-
-    fn pop_stack(&mut self) -> u8 {
-        self.reg_sp = self.reg_sp.wrapping_add(1);
-        self.bus.read(STACK_PAGE | self.reg_sp as u16)
-    }
-
-    fn execute_interrupt(&mut self, interrupt: Interrupt, is_brk: bool) {
-        let [lo, hi] = u16::to_le_bytes(self.reg_pc);
-        self.push_stack(hi);
-        self.push_stack(lo);
-
-        let sr = self.reg_status.value()
-            | if is_brk {
-                Status::BREAK
-            } else {
-                debug_assert!(!self.reg_status.is_set(Status::BREAK));
-                0x00 // We technically want to send this flag cleared, but it should never be set in the cpu, only in stack status
-            };
-
-        self.push_stack(sr);
-
-        self.reg_status.set(Status::INT_DISABLE, true);
-
-        self.reg_pc = self.bus.read_u16(interrupt.vector());
-    }
-
-    fn check_for_interrupt_request(&mut self) {
-        self.interrupt = self.bus.interrupt_requested().take();
-
-        if let Some(int) = &self.interrupt {
-            if *int == Interrupt::Irq && self.reg_status.is_set(Status::INT_DISABLE) {
-                self.interrupt = None;
-            }
-        }
-    }
-
     fn fetch_next_instruction(&mut self) {
         let opcode = self.bus.read(self.reg_pc);
 
@@ -437,11 +341,11 @@ impl Cpu {
         // match opcode and perform action (some actions alter remaining cycle time, maybe)
         match instruction.op_code {
             // Access
-            Lda => self.reg_a = self.run_load_instruction(&instruction),
+            Lda => self.reg_a = self.register_load(&instruction),
             Sta => self.bus.write(instruction.operand, self.reg_a),
-            Ldx => self.reg_x = self.run_load_instruction(&instruction),
+            Ldx => self.reg_x = self.register_load(&instruction),
             Stx => self.bus.write(instruction.operand, self.reg_x),
-            Ldy => self.reg_y = self.run_load_instruction(&instruction),
+            Ldy => self.reg_y = self.register_load(&instruction),
             Sty => self.bus.write(instruction.operand, self.reg_y),
 
             // Transfer
@@ -600,7 +504,7 @@ impl Cpu {
                 // TODO: probably work on interrupt stuff
                 self.reg_pc += 1; // The BRK code always skips the next byte
 
-                self.execute_interrupt(Interrupt::Break, true);
+                self.execute_interrupt(Interrupt::Break);
             }
 
             // Stack
@@ -620,14 +524,12 @@ impl Cpu {
             Txs => self.reg_sp = self.reg_x,
 
             // Flags
-            Clc => self.reg_status.unset_flag(Status::CARRY),
             Sec => self.reg_status.set_flag(Status::CARRY),
-            Cli => {
-                self.reg_status.unset_flag(Status::INT_DISABLE);
-            }
+            Clc => self.reg_status.unset_flag(Status::CARRY),
             Sei => self.reg_status.set_flag(Status::INT_DISABLE),
-            Cld => self.reg_status.unset_flag(Status::DECIMAL),
+            Cli => self.reg_status.unset_flag(Status::INT_DISABLE),
             Sed => self.reg_status.set_flag(Status::DECIMAL),
+            Cld => self.reg_status.unset_flag(Status::DECIMAL),
             Clv => self.reg_status.unset_flag(Status::OVERFLOW),
 
             // Other
@@ -751,6 +653,85 @@ impl Cpu {
         }
 
         state
+    }
+
+    fn push_stack(&mut self, data: u8) {
+        self.bus.write(STACK_PAGE | self.reg_sp as u16, data);
+        self.reg_sp = self.reg_sp.wrapping_sub(1);
+    }
+
+    fn pop_stack(&mut self) -> u8 {
+        self.reg_sp = self.reg_sp.wrapping_add(1);
+        self.bus.read(STACK_PAGE | self.reg_sp as u16)
+    }
+
+    fn execute_interrupt(&mut self, interrupt: Interrupt) {
+        let [lo, hi] = u16::to_le_bytes(self.reg_pc);
+        self.push_stack(hi);
+        self.push_stack(lo);
+
+        let mut sr = self.reg_status;
+        debug_assert!(!self.reg_status.is_set(Status::BREAK));
+        sr.set(Status::BREAK, interrupt == Interrupt::Break);
+        self.push_stack(sr.value());
+
+        self.reg_status.set(Status::INT_DISABLE, true);
+        self.reg_pc = self.bus.read_u16(interrupt.vector());
+    }
+
+    fn check_for_interrupt_request(&mut self) {
+        self.interrupt = self.bus.interrupt_requested().take();
+
+        if let Some(int) = &self.interrupt {
+            if *int == Interrupt::Irq && self.reg_status.is_set(Status::INT_DISABLE) {
+                self.interrupt = None;
+            }
+        }
+    }
+
+    fn update_nz_flag(&mut self, result: u8) {
+        self.reg_status.set_zero(result);
+        self.reg_status.set_negative(result);
+    }
+
+    fn get_operand_value(&mut self, instruction: &Instruction) -> u8 {
+        if instruction.operand_is_address() {
+            self.bus.read(instruction.operand)
+        } else {
+            instruction.operand as u8
+        }
+    }
+
+    fn register_load(&mut self, instruction: &Instruction) -> u8 {
+        let operand_value = self.get_operand_value(instruction);
+        self.update_nz_flag(operand_value);
+        operand_value
+    }
+
+    fn run_cmp_operation(&mut self, instruction: &Instruction, register_value: u8) {
+        let operand_value = self.get_operand_value(instruction);
+        let result = (register_value as u16).wrapping_sub(operand_value as u16);
+
+        self.update_nz_flag(result as u8);
+        self.reg_status.set(Status::CARRY, result & 0xff00 == 0);
+    }
+
+    fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> RunState {
+        let pc_start = self.reg_pc.wrapping_sub(2);
+
+        if condition {
+            if !on_same_page(self.reg_pc, new_addr) {
+                self.cycles_left += 1;
+            }
+            self.reg_pc = new_addr;
+            self.cycles_left += 1;
+        }
+
+        if condition && pc_start == new_addr {
+            RunState::InfiniteLoop(pc_start)
+        } else {
+            RunState::NormalExecution
+        }
     }
 
     // arithmetic
@@ -886,6 +867,17 @@ impl Cpu {
     }
 
     // bitwise
+    fn run_bitwise_operation<F>(&mut self, instruction: &Instruction, operation: F)
+    where
+        F: Fn(u8, u8) -> u8,
+    {
+        let operand_value = self.get_operand_value(instruction);
+        let result = operation(self.reg_a, operand_value);
+
+        self.update_nz_flag(result);
+        self.reg_a = result;
+    }
+
     fn and(&mut self, instruction: &Instruction) {
         self.run_bitwise_operation(instruction, |a, b| a & b);
     }
