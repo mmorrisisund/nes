@@ -344,8 +344,8 @@ impl Cpu {
             | if is_brk {
                 StatusFlag::BreakCmd as u8
             } else {
-                // debug_assert!(!self.is_set(StatusFlag::BreakCmd)); // FIXME: this is getting set somewhere else, breaks test
-                0x00 // We technically want to send this flag cleared, but it should never be set in the cpu
+                debug_assert!(!self.is_set(StatusFlag::BreakCmd));
+                0x00 // We technically want to send this flag cleared, but it should never be set in the cpu, only in stack status
             };
 
         self.push_stack(sr);
@@ -597,8 +597,7 @@ impl Cpu {
                 self.reg_pc = ((hi << 8) | lo) + 1;
             }
             Rti => {
-                let old_status = self.reg_status & 0x30;
-                self.reg_status = self.pop_stack() | old_status;
+                self.reg_status = self.pop_stack() & !0x10; // never set break flag in cpu
 
                 let lo = self.pop_stack() as u16;
                 let hi = self.pop_stack() as u16;
@@ -627,9 +626,7 @@ impl Cpu {
             }
             Php => self.push_stack(self.reg_status | 0x30),
             Plp => {
-                // ignore bit4 and bit5
-                let old_status = self.reg_status & 0x30;
-                self.reg_status = (self.pop_stack() & 0xcf) | old_status;
+                self.reg_status = self.pop_stack() & !0x10; // never set break flag in cpu
             }
             Tsx => {
                 self.reg_x = self.reg_sp;
