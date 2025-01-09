@@ -5,12 +5,15 @@ mod common;
 mod cpu;
 mod nes;
 mod ppu;
+mod util;
 
 use common::mem::MemAccess;
 use nes::Nes;
 
 fn main() {
-    let mut nes = Nes::new("./src/test_roms/apu/mixer/square.nes").unwrap();
+    let mut nes = Nes::new("./src/test_roms/cpu/instr_timing/instr_timing.nes").unwrap();
+
+    // crate::common::test_helpers::execute_blargg_test("./src/test_roms/apu/reset/4015_cleared.nes");
 
     nes.reset();
 

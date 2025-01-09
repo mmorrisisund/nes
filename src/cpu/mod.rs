@@ -1,10 +1,16 @@
 pub mod instruction;
+mod status;
 
+use crate::{
+    bus::Bus,
+    common::{
+        interconnect::{Interrupt, SignalProvider},
+        mem::MemAccess,
+    },
+    util::BitFlag,
+};
 use instruction::{Instruction, OpCode};
-
-use crate::bus::Bus;
-use crate::common::interconnect::{Interrupt, SignalProvider};
-use crate::common::mem::MemAccess;
+use status::{Status, StatusRegister};
 
 const RUN_TRACE: bool = false;
 
@@ -21,17 +27,6 @@ pub enum RunState {
     StartInterrupt,
 }
 
-// NV_BDIZC
-enum StatusFlag {
-    Carry = 1 << 0,
-    Zero = 1 << 1,
-    InterruptDisable = 1 << 2,
-    DecimalMode = 1 << 3,
-    BreakCmd = 1 << 4,
-    Overflow = 1 << 6,
-    Negative = 1 << 7,
-}
-
 fn on_same_page(addr1: u16, addr2: u16) -> bool {
     (addr1 & 0xff00) == (addr2 & 0xff00)
 }
@@ -42,9 +37,8 @@ pub struct Cpu {
     reg_a: u8,
     reg_x: u8,
     reg_y: u8,
-    reg_status: u8,
+    reg_status: StatusRegister,
 
-    nmi_requested: bool,
     interrupt: Option<Interrupt>,
 
     next_instruction: Option<Instruction>,
@@ -63,10 +57,7 @@ impl Cpu {
             reg_y: 0,
             reg_pc: 0,
             reg_sp: STACK_START,
-            reg_status: StatusFlag::InterruptDisable as u8 | 1 << 5, // unused, but always
-
-            nmi_requested: false,
-            // irq_requested: false,
+            reg_status: StatusRegister::default(),
             interrupt: None,
 
             next_instruction: None,
@@ -75,6 +66,7 @@ impl Cpu {
 
             bus,
         };
+
         cpu.reg_pc = cpu.bus.read_u16(RESET_VECTOR_ADDRESS);
         cpu
     }
@@ -85,10 +77,8 @@ impl Cpu {
         self.reg_y = 0;
         self.reg_pc = self.bus.read_u16(RESET_VECTOR_ADDRESS);
         self.reg_sp = STACK_START;
-        self.reg_status = StatusFlag::InterruptDisable as u8 | 1 << 5; // unused, but always 1
+        self.reg_status.reset();
 
-        self.nmi_requested = false;
-        // self.irq_requested = false;
         self.interrupt = None;
 
         self.total_cycles = 7;
@@ -216,9 +206,6 @@ impl Cpu {
             instruction::AddressingMode::IndirectIndexed => {
                 let base = instruction.raw_operand;
 
-                // let lo = self.bus.peek(base) as u16;
-                // let hi = self.bus.peek((base + 1) & 0xff) as u16;
-                // let ptr = (hi << 8) | lo;
                 let [lo, hi] = u16::to_le_bytes(self.bus.peek_u16(base));
                 let ptr = u16::from_le_bytes([lo, hi]);
 
@@ -249,29 +236,9 @@ impl Cpu {
 
 // Private
 impl Cpu {
-    fn set_flag(&mut self, flag: StatusFlag) {
-        self.reg_status |= flag as u8;
-    }
-
-    fn unset_flag(&mut self, flag: StatusFlag) {
-        self.reg_status &= !(flag as u8)
-    }
-
-    fn set_status(&mut self, flag: StatusFlag, is_set: bool) {
-        if is_set {
-            self.set_flag(flag);
-        } else {
-            self.unset_flag(flag);
-        }
-    }
-
-    fn is_set(&self, flag: StatusFlag) -> bool {
-        self.reg_status & flag as u8 != 0
-    }
-
     fn update_nz_flag(&mut self, result: u8) {
-        self.set_status(StatusFlag::Zero, result == 0);
-        self.set_status(StatusFlag::Negative, result & 0x80 != 0);
+        self.reg_status.set_zero(result);
+        self.reg_status.set_negative(result);
     }
 
     fn get_operand_value(&mut self, instruction: &Instruction) -> u8 {
@@ -298,7 +265,7 @@ impl Cpu {
         let result = (register_value as u16).wrapping_sub(operand_value as u16);
 
         self.update_nz_flag(result as u8);
-        self.set_status(StatusFlag::Carry, result & 0xff00 == 0);
+        self.reg_status.set(Status::CARRY, result & 0xff00 == 0);
     }
 
     fn run_branch_condition(&mut self, new_addr: u16, condition: bool) -> RunState {
@@ -340,17 +307,17 @@ impl Cpu {
         self.push_stack(hi);
         self.push_stack(lo);
 
-        let sr = self.reg_status
+        let sr = self.reg_status.value()
             | if is_brk {
-                StatusFlag::BreakCmd as u8
+                Status::BREAK
             } else {
-                debug_assert!(!self.is_set(StatusFlag::BreakCmd));
+                debug_assert!(!self.reg_status.is_set(Status::BREAK));
                 0x00 // We technically want to send this flag cleared, but it should never be set in the cpu, only in stack status
             };
 
         self.push_stack(sr);
 
-        self.set_status(StatusFlag::InterruptDisable, true);
+        self.reg_status.set(Status::INT_DISABLE, true);
 
         self.reg_pc = self.bus.read_u16(interrupt.vector());
     }
@@ -359,7 +326,7 @@ impl Cpu {
         self.interrupt = self.bus.interrupt_requested().take();
 
         if let Some(int) = &self.interrupt {
-            if *int == Interrupt::Irq && self.is_set(StatusFlag::InterruptDisable) {
+            if *int == Interrupt::Irq && self.reg_status.is_set(Status::INT_DISABLE) {
                 self.interrupt = None;
             }
         }
@@ -529,9 +496,11 @@ impl Cpu {
             Ora => self.ora(&instruction),
             Bit => {
                 let data = self.bus.read(instruction.operand);
-                self.set_status(StatusFlag::Zero, self.reg_a & data == 0);
-                self.set_status(StatusFlag::Overflow, data & StatusFlag::Overflow as u8 != 0);
-                self.set_status(StatusFlag::Negative, data & StatusFlag::Negative as u8 != 0);
+                self.reg_status.set(Status::ZERO, self.reg_a & data == 0);
+                self.reg_status
+                    .set(Status::OVERFLOW, data.contains(Status::OVERFLOW));
+                self.reg_status
+                    .set(Status::NEGATIVE, data.contains(Status::NEGATIVE));
             }
 
             // Compare
@@ -541,36 +510,52 @@ impl Cpu {
 
             // Branch
             Bcc => {
-                state =
-                    self.run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Carry));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    !self.reg_status.is_set(Status::CARRY),
+                );
             }
             Bcs => {
-                state =
-                    self.run_branch_condition(instruction.operand, self.is_set(StatusFlag::Carry));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    self.reg_status.is_set(Status::CARRY),
+                );
             }
             Beq => {
-                state =
-                    self.run_branch_condition(instruction.operand, self.is_set(StatusFlag::Zero));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    self.reg_status.is_set(Status::ZERO),
+                );
             }
             Bne => {
-                state =
-                    self.run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Zero));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    !self.reg_status.is_set(Status::ZERO),
+                );
             }
             Bpl => {
-                state = self
-                    .run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Negative));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    !self.reg_status.is_set(Status::NEGATIVE),
+                );
             }
             Bmi => {
-                state = self
-                    .run_branch_condition(instruction.operand, self.is_set(StatusFlag::Negative));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    self.reg_status.is_set(Status::NEGATIVE),
+                );
             }
             Bvc => {
-                state = self
-                    .run_branch_condition(instruction.operand, !self.is_set(StatusFlag::Overflow));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    !self.reg_status.is_set(Status::OVERFLOW),
+                );
             }
             Bvs => {
-                state = self
-                    .run_branch_condition(instruction.operand, self.is_set(StatusFlag::Overflow));
+                state = self.run_branch_condition(
+                    instruction.operand,
+                    self.reg_status.is_set(Status::OVERFLOW),
+                );
             }
 
             // Jump
@@ -597,14 +582,14 @@ impl Cpu {
                 self.reg_pc = ((hi << 8) | lo) + 1;
             }
             Rti => {
-                self.reg_status = self.pop_stack() & !0x10; // never set break flag in cpu
+                self.reg_status = (self.pop_stack() & !0x10).into(); // never set break flag in cpu
 
                 let lo = self.pop_stack() as u16;
                 let hi = self.pop_stack() as u16;
                 self.reg_pc = (hi << 8) | lo;
 
                 // RTI's effect on IRQ Disable is immediate
-                if self.is_set(StatusFlag::InterruptDisable) {
+                if self.reg_status.is_set(Status::INT_DISABLE) {
                     self.interrupt = None;
                 } else {
                     self.check_for_interrupt_request();
@@ -624,9 +609,9 @@ impl Cpu {
                 self.reg_a = self.pop_stack();
                 self.update_nz_flag(self.reg_a);
             }
-            Php => self.push_stack(self.reg_status | 0x30),
+            Php => self.push_stack(self.reg_status.value() | 0x30),
             Plp => {
-                self.reg_status = self.pop_stack() & !0x10; // never set break flag in cpu
+                self.reg_status = (self.pop_stack() & !0x10).into(); // never set break flag in cpu
             }
             Tsx => {
                 self.reg_x = self.reg_sp;
@@ -635,15 +620,15 @@ impl Cpu {
             Txs => self.reg_sp = self.reg_x,
 
             // Flags
-            Clc => self.unset_flag(StatusFlag::Carry),
-            Sec => self.set_flag(StatusFlag::Carry),
+            Clc => self.reg_status.unset_flag(Status::CARRY),
+            Sec => self.reg_status.set_flag(Status::CARRY),
             Cli => {
-                self.unset_flag(StatusFlag::InterruptDisable);
+                self.reg_status.unset_flag(Status::INT_DISABLE);
             }
-            Sei => self.set_flag(StatusFlag::InterruptDisable),
-            Cld => self.unset_flag(StatusFlag::DecimalMode),
-            Sed => self.set_flag(StatusFlag::DecimalMode),
-            Clv => self.unset_flag(StatusFlag::Overflow),
+            Sei => self.reg_status.set_flag(Status::INT_DISABLE),
+            Cld => self.reg_status.unset_flag(Status::DECIMAL),
+            Sed => self.reg_status.set_flag(Status::DECIMAL),
+            Clv => self.reg_status.unset_flag(Status::OVERFLOW),
 
             // Other
             Nop => {}
@@ -656,16 +641,18 @@ impl Cpu {
             }
             Anc => {
                 self.and(&instruction);
-                self.set_status(StatusFlag::Carry, self.is_set(StatusFlag::Negative));
+                self.reg_status
+                    .set(Status::CARRY, self.reg_status.is_set(Status::NEGATIVE));
             }
             Arr => {
                 self.and(&instruction);
 
                 self.ror(&instruction);
 
-                self.set_status(StatusFlag::Carry, (self.reg_a >> 6) & 1 != 0);
-                self.set_status(
-                    StatusFlag::Overflow,
+                self.reg_status
+                    .set(Status::CARRY, (self.reg_a >> 6) & 1 != 0);
+                self.reg_status.set(
+                    Status::OVERFLOW,
                     (self.reg_a >> 6 & 1) ^ (self.reg_a >> 5 & 1) != 0,
                 );
             }
@@ -769,7 +756,7 @@ impl Cpu {
     // arithmetic
     fn adc(&mut self, instruction: &Instruction) {
         let operand_value = self.get_operand_value(instruction);
-        let carry_value = (self.reg_status & 0x01) as u16; // works b/c carry is bit0
+        let carry_value = (self.reg_status.value() & 0x01) as u16; // works b/c carry is bit0
 
         let result = (self.reg_a as u16)
             .wrapping_add(operand_value as u16)
@@ -779,15 +766,15 @@ impl Cpu {
         let result = result as u8;
         let overflow = (result ^ self.reg_a) & (result ^ operand_value) & 0x80 != 0;
 
-        self.set_status(StatusFlag::Carry, carry);
-        self.set_status(StatusFlag::Overflow, overflow);
+        self.reg_status.set(Status::CARRY, carry);
+        self.reg_status.set(Status::OVERFLOW, overflow);
         self.update_nz_flag(result);
         self.reg_a = result;
     }
 
     fn sbc(&mut self, instruction: &Instruction) {
         let operand_value = self.get_operand_value(instruction);
-        let carry_value = (self.reg_status & 0x01) as u16; // works b/c carry is bit0
+        let carry_value = (self.reg_status.value() & 0x01) as u16; // works b/c carry is bit0
 
         let result = (self.reg_a as u16)
             .wrapping_add(!(operand_value as u16))
@@ -797,8 +784,8 @@ impl Cpu {
         let result = result as u8;
         let overflow = (result ^ self.reg_a) & (result ^ !operand_value) & 0x80 != 0;
 
-        self.set_status(StatusFlag::Carry, carry);
-        self.set_status(StatusFlag::Overflow, overflow);
+        self.reg_status.set(Status::CARRY, carry);
+        self.reg_status.set(Status::OVERFLOW, overflow);
         self.update_nz_flag(result);
         self.reg_a = result;
     }
@@ -835,7 +822,7 @@ impl Cpu {
             self.reg_a = new_value
         }
         self.update_nz_flag(new_value);
-        self.set_status(StatusFlag::Carry, value & 0x80 != 0);
+        self.reg_status.set(Status::CARRY, value & 0x80 != 0);
     }
 
     fn lsr(&mut self, instruction: &Instruction) {
@@ -852,7 +839,7 @@ impl Cpu {
         } else {
             self.reg_a = new_value;
         }
-        self.set_status(StatusFlag::Carry, value & 0x01 != 0);
+        self.reg_status.set(Status::CARRY, value & 0x01 != 0);
         self.update_nz_flag(new_value);
     }
 
@@ -864,14 +851,14 @@ impl Cpu {
         };
 
         let mut new_value = value << 1;
-        new_value |= self.reg_status & StatusFlag::Carry as u8; // this works b/c carry flag is bit0
+        new_value |= self.reg_status.value() & (1 << Status::CARRY); // this works b/c carry flag is bit0
 
         if instruction.operand_is_address() {
             self.bus.write(instruction.operand, new_value);
         } else {
             self.reg_a = new_value;
         }
-        self.set_status(StatusFlag::Carry, value & 0x80 != 0);
+        self.reg_status.set(Status::CARRY, value & 0x80 != 0);
         self.update_nz_flag(new_value);
     }
 
@@ -883,7 +870,7 @@ impl Cpu {
         };
 
         let mut new_value = value >> 1;
-        new_value |= if self.is_set(StatusFlag::Carry) {
+        new_value |= if self.reg_status.is_set(Status::CARRY) {
             0x80
         } else {
             0x00
@@ -894,7 +881,7 @@ impl Cpu {
         } else {
             self.reg_a = new_value;
         }
-        self.set_status(StatusFlag::Carry, value & 0x01 != 0);
+        self.reg_status.set(Status::CARRY, value & 0x01 != 0);
         self.update_nz_flag(new_value);
     }
 
