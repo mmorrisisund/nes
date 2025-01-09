@@ -2,16 +2,14 @@ use crate::{
     apu::{Apu, ApuRegisters, Channel},
     cartridge::Cartridge,
     common::{
-        interconnect::{InterruptSignaler, SignalProvider},
+        interconnect::{Interrupt, InterruptSignaler, SignalProvider},
         mem::{MemAccess, Reset},
     },
-    ppu::Ppu,
 };
 
 pub struct Bus {
     ram: [u8; 0x800],
     pub apu: Apu,
-    ppu: Ppu,
     cartridge: Cartridge,
 }
 
@@ -20,7 +18,6 @@ impl Bus {
         Self {
             ram: [0; 0x800],
             apu: Apu::new(),
-            ppu: Ppu {},
             cartridge: Cartridge::empty(),
         }
     }
@@ -122,11 +119,14 @@ impl Reset for Bus {
 }
 
 impl SignalProvider for Bus {
-    fn nmi_requested(&self) -> bool {
-        self.ppu.interrupt_status()
-    }
+    fn interrupt_requested(&self) -> Option<Interrupt> {
+        // check for nmi first
 
-    fn interrupt_requested(&self) -> bool {
-        self.apu.interrupt_status()
+        // then irq
+        if self.apu.interrupt_status() {
+            Some(Interrupt::Irq)
+        } else {
+            None
+        }
     }
 }

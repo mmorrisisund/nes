@@ -8,8 +8,9 @@ use crate::{
     },
     cpu::RunState,
     nes::Nes,
-    ppu::Ppu,
 };
+
+use super::interconnect::Interrupt;
 
 const STATUS_ADDR: u16 = 0x6000;
 const TEXT_ADDR: u16 = 0x6004;
@@ -26,7 +27,6 @@ impl TestNes {
     }
 
     fn cycle_until_infinite(&mut self) -> u64 {
-        // reminder: don't trace, alters apu register on read
         // println!("{}", self.nes.cpu_trace());
         let mut total_cycles = 0;
         loop {
@@ -42,7 +42,6 @@ impl TestNes {
     }
 
     fn cycle_until_mem_neq(&mut self, address: u16, value: u8) {
-        // reminder: don't trace, alters apu register on read
         loop {
             self.nes.clock_cycle();
 
@@ -60,7 +59,6 @@ impl TestNes {
 pub struct TestBusRom {
     ram: [u8; 0x800],
     apu: Apu,
-    ppu: Ppu,
     cartridge: Cartridge,
 }
 
@@ -97,12 +95,12 @@ impl Reset for TestBusRom {
 }
 
 impl SignalProvider for TestBusRom {
-    fn nmi_requested(&self) -> bool {
-        self.ppu.interrupt_status()
-    }
-
-    fn interrupt_requested(&self) -> bool {
-        self.apu.interrupt_status()
+    fn interrupt_requested(&self) -> Option<Interrupt> {
+        if self.apu.interrupt_status() {
+            Some(Interrupt::Irq)
+        } else {
+            None
+        }
     }
 }
 

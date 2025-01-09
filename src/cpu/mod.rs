@@ -3,14 +3,12 @@ pub mod instruction;
 use instruction::{Instruction, OpCode};
 
 use crate::bus::Bus;
-use crate::common::interconnect::SignalProvider;
+use crate::common::interconnect::{Interrupt, SignalProvider};
 use crate::common::mem::MemAccess;
 
 const RUN_TRACE: bool = false;
 
-const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 const RESET_VECTOR_ADDRESS: u16 = 0xfffc;
-const IRQ_VECTOR_ADDRESS: u16 = 0xfffe;
 
 const STACK_PAGE: u16 = 0x0100;
 const STACK_START: u8 = 0xfd;
@@ -47,7 +45,7 @@ pub struct Cpu {
     reg_status: u8,
 
     nmi_requested: bool,
-    irq_requested: bool,
+    interrupt: Option<Interrupt>,
 
     next_instruction: Option<Instruction>,
     cycles_left: u8,
@@ -68,7 +66,8 @@ impl Cpu {
             reg_status: StatusFlag::InterruptDisable as u8 | 1 << 5, // unused, but always
 
             nmi_requested: false,
-            irq_requested: false,
+            // irq_requested: false,
+            interrupt: None,
 
             next_instruction: None,
             cycles_left: 0,
@@ -89,7 +88,8 @@ impl Cpu {
         self.reg_status = StatusFlag::InterruptDisable as u8 | 1 << 5; // unused, but always 1
 
         self.nmi_requested = false;
-        self.irq_requested = false;
+        // self.irq_requested = false;
+        self.interrupt = None;
 
         self.total_cycles = 7;
 
@@ -104,8 +104,8 @@ impl Cpu {
         self.run_apu();
 
         if self.cycles_left == 0 && self.next_instruction.is_none() {
-            if self.nmi_requested || self.irq_requested {
-                self.execute_interrupt(false);
+            if let Some(int) = self.interrupt.take() {
+                self.execute_interrupt(int, false);
                 RunState::StartInterrupt
             } else {
                 self.fetch_next_instruction();
@@ -335,18 +335,10 @@ impl Cpu {
         self.bus.read(STACK_PAGE | self.reg_sp as u16)
     }
 
-    fn execute_interrupt(&mut self, is_brk: bool) {
+    fn execute_interrupt(&mut self, interrupt: Interrupt, is_brk: bool) {
         let [lo, hi] = u16::to_le_bytes(self.reg_pc);
         self.push_stack(hi);
         self.push_stack(lo);
-
-        let interrupt_vector = if self.nmi_requested {
-            self.nmi_requested = false;
-            NMI_VECTOR_ADDRESS
-        } else {
-            self.irq_requested = false;
-            IRQ_VECTOR_ADDRESS
-        };
 
         let sr = self.reg_status
             | if is_brk {
@@ -355,19 +347,22 @@ impl Cpu {
                 // debug_assert!(!self.is_set(StatusFlag::BreakCmd)); // FIXME: this is getting set somewhere else, breaks test
                 0x00 // We technically want to send this flag cleared, but it should never be set in the cpu
             };
+
         self.push_stack(sr);
 
         self.set_status(StatusFlag::InterruptDisable, true);
 
-        self.reg_pc = self.bus.read_u16(interrupt_vector);
+        self.reg_pc = self.bus.read_u16(interrupt.vector());
     }
 
     fn check_for_interrupt_request(&mut self) {
-        if self.bus.interrupt_requested() && !self.is_set(StatusFlag::InterruptDisable) {
-            self.irq_requested = true;
-        }
+        self.interrupt = self.bus.interrupt_requested().take();
 
-        self.nmi_requested = self.bus.nmi_requested();
+        if let Some(int) = &self.interrupt {
+            if *int == Interrupt::Irq && self.is_set(StatusFlag::InterruptDisable) {
+                self.interrupt = None;
+            }
+        }
     }
 
     fn fetch_next_instruction(&mut self) {
@@ -611,7 +606,7 @@ impl Cpu {
 
                 // RTI's effect on IRQ Disable is immediate
                 if self.is_set(StatusFlag::InterruptDisable) {
-                    self.irq_requested = false;
+                    self.interrupt = None;
                 } else {
                     self.check_for_interrupt_request();
                 }
@@ -621,7 +616,7 @@ impl Cpu {
                 // TODO: probably work on interrupt stuff
                 self.reg_pc += 1; // The BRK code always skips the next byte
 
-                self.execute_interrupt(true);
+                self.execute_interrupt(Interrupt::Break, true);
             }
 
             // Stack
