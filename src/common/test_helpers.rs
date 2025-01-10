@@ -62,6 +62,16 @@ pub struct TestBusRom {
     cartridge: Cartridge,
 }
 
+// impl TestBusRom {
+//     pub fn new(cartridge: Cartridge) -> Self {
+//         Self {
+//             ram: [0; 0x800],
+//             apu: Apu::new(),
+//             cartridge,
+//         }
+//     }
+// }
+
 impl MemAccess for TestBusRom {
     fn read(&mut self, address: u16) -> u8 {
         match address {

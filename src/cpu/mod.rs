@@ -903,7 +903,15 @@ impl Cpu {
 #[cfg(test)]
 mod tests {
 
-    use crate::common::test_helpers::execute_blargg_test;
+    use crate::{
+        // cartridge::Cartridge,
+        common::{
+            // mem::MemAccess,
+            test_helpers::execute_blargg_test, // TestBusRom},
+        },
+    };
+
+    // use super::Cpu;
 
     #[cfg(target_arch = "wasm32")] // using this to disable this test
     mod functional {
@@ -979,9 +987,8 @@ mod tests {
         }
     }
 
-    // FIXME: This test relies on trace, which currently modifies the cpu state (instruction) and breaks the test
     #[cfg(target_arch = "wasm32")] // using this to disable this test
-    #[ignore = "broken due to trace implmentation"]
+    // #[ignore = "need to update for architecture changes"]
     #[test]
     fn nestest() {
         let mut cartridge =
@@ -997,7 +1004,7 @@ mod tests {
         cartridge.write(0xfffd, 0x80);
 
         let bus = TestBusRom::new(cartridge);
-        let mut cpu = CPU::new(bus);
+        let mut cpu = Cpu::new(bus);
 
         // The end of this test results file was modified to return 00 instead of FF in the final checks.
         // I believe this can be reverted once memory mapping and/or ppu is in place.
