@@ -3,7 +3,7 @@ use std::path::Path;
 use dynwave::AudioPlayer;
 
 use crate::{
-    bus::Bus,
+    bus::MainBus,
     cartridge::{Cartridge, CartridgeError},
     common::mem::Reset,
     cpu::{Cpu, RunState},
@@ -17,7 +17,7 @@ pub struct Nes {
 impl Nes {
     pub fn new<P: AsRef<Path>>(file_path: P) -> Result<Self, CartridgeError> {
         let cartridge = Cartridge::from_file(file_path)?;
-        let mut bus = Bus::new();
+        let mut bus = MainBus::new();
         bus.load_cart(cartridge);
 
         let cpu = Cpu::new(bus);
@@ -43,7 +43,7 @@ impl Nes {
         self.cpu.clock_cycle()
     }
 
-    pub fn bus_mut(&mut self) -> &mut Bus {
+    pub fn bus_mut(&mut self) -> &mut MainBus {
         self.cpu.bus_mut()
     }
 }

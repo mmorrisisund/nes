@@ -2,7 +2,7 @@ pub mod instruction;
 mod status;
 
 use crate::{
-    bus::Bus,
+    bus::MainBus,
     common::{
         interconnect::{Interrupt, SignalProvider},
         mem::MemAccess,
@@ -45,12 +45,12 @@ pub struct Cpu {
     cycles_left: u8,
     total_cycles: u64,
 
-    bus: Bus,
+    bus: MainBus,
 }
 
 // Public
 impl Cpu {
-    pub fn new(bus: Bus) -> Self {
+    pub fn new(bus: MainBus) -> Self {
         let mut cpu = Self {
             reg_a: 0,
             reg_x: 0,
@@ -229,7 +229,7 @@ impl Cpu {
         println!("{asm:47} {regs}")
     }
 
-    pub fn bus_mut(&mut self) -> &mut Bus {
+    pub fn bus_mut(&mut self) -> &mut MainBus {
         &mut self.bus
     }
 }

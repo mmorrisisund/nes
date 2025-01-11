@@ -1,6 +1,6 @@
 use crate::{
     apu::Apu,
-    bus::Bus,
+    bus::MainBus,
     cartridge::Cartridge,
     common::{
         interconnect::{InterruptSignaler, SignalProvider},
@@ -51,7 +51,7 @@ impl TestNes {
         }
     }
 
-    fn cpu_bus_mut(&mut self) -> &mut Bus {
+    fn cpu_bus_mut(&mut self) -> &mut MainBus {
         self.nes.bus_mut()
     }
 }
