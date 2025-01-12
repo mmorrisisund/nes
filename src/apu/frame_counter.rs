@@ -134,4 +134,8 @@ impl InterruptSignaler for FrameCounter {
     fn interrupt_status(&self) -> bool {
         self.interrupt_flag
     }
+
+    fn dma_status(&self) -> Option<u16> {
+        None
+    }
 }

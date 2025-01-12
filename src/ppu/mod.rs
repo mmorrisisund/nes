@@ -33,9 +33,22 @@ impl Default for Ppu {
 impl Ppu {
     pub fn new() -> Self {
         Self {
+            bus: PpuBus::default(),
+            control: ControlRegister::default(),
+            mask: MaskRegister::default(),
+            status: StatusRegister::default(),
+            v_addr: AddressRegister::default(), // internal v register
+            t_addr: AddressRegister::default(), // internal t register
+            first_write: true,                  // internal w register
+            fine_x: 0,                          // internal x register
+            oam_addr: 0,
             oam_data: [0; 256],
-            ..Default::default()
+            vram_buffer: 0,
         }
+    }
+
+    pub fn clock(&mut self) {
+        todo!()
     }
 
     fn vram_increment_addr(&mut self) {
@@ -146,5 +159,9 @@ impl Ppu {
 impl InterruptSignaler for Ppu {
     fn interrupt_status(&self) -> bool {
         false
+    }
+
+    fn dma_status(&self) -> Option<u16> {
+        todo!()
     }
 }

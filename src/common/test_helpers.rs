@@ -112,6 +112,10 @@ impl SignalProvider for TestBusRom {
             None
         }
     }
+
+    fn dma_requested(&self) -> Option<super::interconnect::DmaSource> {
+        todo!()
+    }
 }
 
 fn create_test_nes(file_path: &str) -> TestNes {

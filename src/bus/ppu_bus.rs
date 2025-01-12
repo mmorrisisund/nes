@@ -56,18 +56,18 @@ impl MemAccess for PpuBus {
 
     fn peek(&self, address: u16) -> u8 {
         match address {
-            0x0000..0x2000 => todo!("peek chr_rom"),
+            0x0000..0x2000 => 0,
             0x2000..0x3f00 => self.vram[self.get_vram_address(address)],
-            0x3f00..0x4000 => todo!("peek palette"),
+            0x3f00..0x4000 => 0,
             _ => self.peek(address & 0x3fff),
         }
     }
 
     fn write(&mut self, address: u16, value: u8) {
         match address {
-            0x0000..0x2000 => todo!("write chr_rom"),
+            0x0000..0x2000 => {}
             0x2000..0x3f00 => self.vram[self.get_vram_address(address)] = value,
-            0x3f00..0x4000 => todo!("write palette"),
+            0x3f00..0x4000 => {}
             _ => self.write(address & 0x3fff, value),
         }
     }

@@ -25,7 +25,8 @@ pub struct Dmc {
     silence: bool,
 
     irq_enabled: bool,
-    interrupt_flag: bool,
+    interrupt_flag: bool, // irq with info that entire sample exhaustd. all bytes read.
+                          // dma request is just for next byte when there are still bytes left
 }
 
 impl Dmc {
@@ -63,14 +64,6 @@ impl Dmc {
 
     pub fn clear_interrupt(&mut self) {
         self.interrupt_flag = false;
-    }
-
-    pub fn next_address(&mut self) -> Option<u16> {
-        if self.buffer_empty && self.bytes_remaining > 0 {
-            Some(self.current_sample_addr)
-        } else {
-            None
-        }
     }
 
     pub fn set_sample_buffer(&mut self, value: u8) {
@@ -145,5 +138,13 @@ impl TimerTrait for Dmc {
 impl InterruptSignaler for Dmc {
     fn interrupt_status(&self) -> bool {
         self.interrupt_flag
+    }
+
+    fn dma_status(&self) -> Option<u16> {
+        if self.buffer_empty && self.bytes_remaining > 0 {
+            Some(self.current_sample_addr)
+        } else {
+            None
+        }
     }
 }

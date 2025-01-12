@@ -1,9 +1,17 @@
 pub trait InterruptSignaler {
     fn interrupt_status(&self) -> bool;
+    fn dma_status(&self) -> Option<u16>;
 }
 
 pub trait SignalProvider {
     fn interrupt_requested(&self) -> Option<Interrupt>;
+    fn dma_requested(&self) -> Option<DmaSource>;
+}
+
+#[derive(Debug, PartialEq)]
+pub enum DmaSource {
+    Apu(u16),
+    Ppu(u8),
 }
 
 #[derive(Debug, PartialEq)]

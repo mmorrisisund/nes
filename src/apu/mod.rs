@@ -100,10 +100,6 @@ impl Apu {
         self.sample_buffer.drain(..).collect()
     }
 
-    pub fn dmc_read_request(&mut self) -> Option<u16> {
-        self.dmc.next_address()
-    }
-
     pub fn dmc_write(&mut self, value: u8) {
         self.dmc.set_sample_buffer(value);
     }
@@ -240,14 +236,12 @@ impl Reset for Apu {
 
 impl InterruptSignaler for Apu {
     fn interrupt_status(&self) -> bool {
-        // self.frame_counter.interrupt_status() || self.dmc.interrupt_status()
         self.frame_counter.interrupt_status()
     }
 
-    // fn clear_interrupt(&mut self) {
-    //     self.frame_counter.clear_interrupt();
-    //     self.dmc.clear_interrupt();
-    // }
+    fn dma_status(&self) -> Option<u16> {
+        self.dmc.dma_status()
+    }
 }
 
 #[cfg(test)]

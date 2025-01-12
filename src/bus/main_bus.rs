@@ -2,7 +2,7 @@ use crate::{
     apu::{Apu, ApuRegisters, Channel},
     cartridge::Cartridge,
     common::{
-        interconnect::{Interrupt, InterruptSignaler, SignalProvider},
+        interconnect::{DmaSource, Interrupt, InterruptSignaler, SignalProvider},
         mem::{MemAccess, Reset},
     },
     ppu::Ppu,
@@ -10,7 +10,7 @@ use crate::{
 
 pub struct MainBus {
     ram: [u8; 0x800],
-    pub apu: Apu,
+    apu: Apu,
     ppu: Ppu,
     cartridge: Cartridge,
 }
@@ -27,6 +27,21 @@ impl MainBus {
 
     pub fn load_cart(&mut self, cartridge: Cartridge) {
         self.cartridge = cartridge;
+    }
+
+    pub fn clock(&mut self) {
+        self.apu.clock_cycle();
+
+        // for _ in 0..3 {
+        //     self.ppu.clock();
+        // }
+    }
+
+    pub fn write_dma(&mut self, value: u8, source: DmaSource) {
+        match source {
+            DmaSource::Apu(_) => self.apu.dmc_write(value),
+            DmaSource::Ppu(_) => {}
+        }
     }
 
     pub fn drain_audio_buffer(&mut self) -> Vec<f32> {
@@ -133,5 +148,9 @@ impl SignalProvider for MainBus {
         } else {
             None
         }
+    }
+
+    fn dma_requested(&self) -> Option<DmaSource> {
+        self.apu.dma_status().take().map(DmaSource::Apu)
     }
 }

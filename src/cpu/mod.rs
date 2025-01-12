@@ -4,7 +4,7 @@ mod status;
 use crate::{
     bus::MainBus,
     common::{
-        interconnect::{Interrupt, SignalProvider},
+        interconnect::{DmaSource, Interrupt, SignalProvider},
         mem::MemAccess,
     },
     util::BitFlag,
@@ -91,7 +91,9 @@ impl Cpu {
 
         self.trace();
 
-        self.run_apu();
+        self.bus.clock();
+
+        self.check_for_dma_request();
 
         if self.cycles_left == 0 && self.next_instruction.is_none() {
             if let Some(int) = self.interrupt.take() {
@@ -890,12 +892,15 @@ impl Cpu {
         self.run_bitwise_operation(instruction, |a, b| a | b);
     }
 
-    fn run_apu(&mut self) {
-        self.bus.apu.clock_cycle();
-
-        if let Some(addr) = self.bus.apu.dmc_read_request() {
-            let value = self.bus.read(addr);
-            self.bus.apu.dmc_write(value);
+    fn check_for_dma_request(&mut self) {
+        if let Some(dma) = self.bus.dma_requested() {
+            match dma {
+                DmaSource::Apu(address) => {
+                    let value = self.bus.read(address);
+                    self.bus.write_dma(value, DmaSource::Apu(0)); // DmaSource addr not used
+                }
+                DmaSource::Ppu(_hi) => {}
+            }
         }
     }
 }
