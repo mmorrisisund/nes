@@ -17,7 +17,7 @@ pub trait MemAccess {
         u16::from_le_bytes([lo, hi])
     }
 
-    fn write(&mut self, address: u16, data: u8);
+    fn write(&mut self, address: u16, value: u8);
 }
 
 pub trait Reset {

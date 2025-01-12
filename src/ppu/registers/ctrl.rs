@@ -42,7 +42,7 @@ impl ControlRegister {
         self.0 = value;
     }
 
-    pub fn get_nametable(&self) -> u16 {
+    pub fn nametable(&self) -> u16 {
         match self.0 {
             0 => NAMETABLE1,
             1 => NAMETABLE2,
@@ -52,42 +52,42 @@ impl ControlRegister {
         }
     }
 
-    pub fn get_vram_increment(&self) -> u8 {
+    pub fn vram_increment(&self) -> u8 {
         match self.0.contains(Control::VRAM_INCREMENT) {
             true => 32,
             false => 1,
         }
     }
 
-    pub fn get_sprite_pattern_addr(&self) -> u16 {
+    pub fn sprite_pattern_addr(&self) -> u16 {
         match self.0.contains(Control::SPRITE_PATTERN_ADDR) {
             true => 0x1000,
             false => 0x0000,
         }
     }
 
-    pub fn get_bg_pattern_addr(&self) -> u16 {
+    pub fn bg_pattern_addr(&self) -> u16 {
         match self.0.contains(Control::BG_PATTERN_ADDR) {
             true => 0x1000,
             false => 0x0000,
         }
     }
 
-    pub fn get_sprite_size(&self) -> u16 {
+    pub fn sprite_size(&self) -> u16 {
         match self.0.contains(Control::SPRITE_SIZE) {
             true => 16,
             false => 8,
         }
     }
 
-    pub fn get_main_sub_select(&self) -> u8 {
+    pub fn main_sub_select(&self) -> u8 {
         match self.0.contains(Control::MAIN_SUB_SELECT) {
             true => 1,
             false => 0,
         }
     }
 
-    pub fn get_nmi_enable(&self) -> bool {
+    pub fn nmi_enable(&self) -> bool {
         self.0.contains(Control::NMI_ENABLE)
     }
 }
