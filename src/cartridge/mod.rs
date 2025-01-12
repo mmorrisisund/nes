@@ -7,13 +7,19 @@ use std::path::Path;
 use crate::common::mem::{MemAccess, Reset};
 pub use error::CartridgeError;
 
+#[derive(Debug)]
+pub enum Mirroring {
+    Vertical,
+    Horizontal,
+    FourScreen,
+}
+
 #[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
 #[derive(Debug)]
 struct INesHeader {
     prg_rom_size: u8,
     chr_rom_size: u8,
-    vertical_mirroring_set: bool,
-    four_screen_mirroring_set: bool,
+    mirroring: Mirroring,
     has_battery_ram: bool,
     has_trainer: bool,
     mapper: u8,
@@ -35,8 +41,7 @@ impl INesHeader {
         let display_type = header[9];
         let reserved = &header[10..16];
 
-        let (vertical_mirroring_set, has_battery_ram, has_trainer, four_screen_mirroring_set, lo) =
-            Self::parse_control1(control1);
+        let (mirroring, has_battery_ram, has_trainer, lo) = Self::parse_control1(control1);
 
         let (is_ines2, hi) = Self::parse_control2(control2);
         let mapper = hi | lo;
@@ -56,8 +61,7 @@ impl INesHeader {
         Ok(INesHeader {
             prg_rom_size,
             chr_rom_size,
-            vertical_mirroring_set,
-            four_screen_mirroring_set,
+            mirroring,
             has_battery_ram,
             has_trainer,
             mapper,
@@ -79,7 +83,7 @@ impl INesHeader {
         }
     }
 
-    fn parse_control1(mut byte: u8) -> (bool, bool, bool, bool, u8) {
+    fn parse_control1(mut byte: u8) -> (Mirroring, bool, bool, u8) {
         let has_vertical = byte & 0x01 == 0;
         byte >>= 1;
 
@@ -94,7 +98,13 @@ impl INesHeader {
 
         let lo = byte & 0xf;
 
-        (has_vertical, has_battery, has_trainer, has_four_screen, lo)
+        let mirroring = match (has_vertical, has_four_screen) {
+            (_, true) => Mirroring::FourScreen,
+            (true, _) => Mirroring::Vertical,
+            (false, _) => Mirroring::Horizontal,
+        };
+
+        (mirroring, has_battery, has_trainer, lo)
     }
 
     fn parse_control2(mut byte: u8) -> (bool, u8) {
