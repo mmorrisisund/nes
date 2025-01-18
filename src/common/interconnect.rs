@@ -17,18 +17,18 @@ pub enum DmaSource {
 #[derive(Debug, PartialEq)]
 pub enum Interrupt {
     Irq,
-    // Nmi,
+    Nmi,
     Break,
 }
 
 impl Interrupt {
     const IRQ_VECTOR_ADDRESS: u16 = 0xfffe;
-    // const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
+    const NMI_VECTOR_ADDRESS: u16 = 0xfffa;
 
     pub fn vector(&self) -> u16 {
         match self {
             Self::Irq => Self::IRQ_VECTOR_ADDRESS,
-            // Self::Nmi => Self::NMI_VECTOR_ADDRESS,
+            Self::Nmi => Self::NMI_VECTOR_ADDRESS,
             Self::Break => Self::IRQ_VECTOR_ADDRESS,
         }
     }

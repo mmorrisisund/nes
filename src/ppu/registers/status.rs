@@ -49,7 +49,7 @@ impl StatusRegister {
         self.0.contains(Status::VBLANK_STARTED)
     }
 
-    pub fn reset(&mut self) {
-        self.0 = 0;
+    pub fn clear(&mut self) {
+        self.0 = 0b0001_1111; // TODO: can this just set to 0 since other bits are open bus
     }
 }

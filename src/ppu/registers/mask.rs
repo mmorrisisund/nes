@@ -73,4 +73,8 @@ impl MaskRegister {
         }
         colors
     }
+
+    pub fn rendering_enabled(&self) -> bool {
+        self.show_background() || self.show_sprite()
+    }
 }

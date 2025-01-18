@@ -1,21 +1,19 @@
 use crate::{cartridge::Mirroring, common::mem::MemAccess};
 
 const VRAM_SIZE: usize = 2048;
+const PALETTE_SIZE: usize = 32;
 
 #[derive(Debug)]
 pub struct PpuBus {
     chr_rom: Vec<u8>,
     vram: [u8; VRAM_SIZE],
     mirroring: Mirroring,
+    palette: [u8; PALETTE_SIZE],
 }
 
 impl Default for PpuBus {
     fn default() -> Self {
-        Self {
-            chr_rom: Vec::new(),
-            vram: [0; VRAM_SIZE],
-            mirroring: Mirroring::Horizontal,
-        }
+        Self::new(Mirroring::Horizontal)
     }
 }
 
@@ -25,6 +23,7 @@ impl PpuBus {
             chr_rom: Vec::new(),
             vram: [0; VRAM_SIZE],
             mirroring,
+            palette: [0; PALETTE_SIZE],
         }
     }
 }
@@ -56,9 +55,9 @@ impl MemAccess for PpuBus {
 
     fn peek(&self, address: u16) -> u8 {
         match address {
-            0x0000..0x2000 => 0,
+            0x0000..0x2000 => self.chr_rom.get(address as usize).copied().unwrap_or(0),
             0x2000..0x3f00 => self.vram[self.get_vram_address(address)],
-            0x3f00..0x4000 => 0,
+            0x3f00..0x4000 => self.palette[(address & 0x1f) as usize],
             _ => self.peek(address & 0x3fff),
         }
     }

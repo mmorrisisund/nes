@@ -32,9 +32,9 @@ impl MainBus {
     pub fn clock(&mut self) {
         self.apu.clock_cycle();
 
-        // for _ in 0..3 {
-        //     self.ppu.clock();
-        // }
+        for _ in 0..3 {
+            self.ppu.clock();
+        }
     }
 
     pub fn write_dma(&mut self, value: u8, source: DmaSource) {
