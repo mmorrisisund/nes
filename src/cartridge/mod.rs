@@ -1,5 +1,6 @@
 mod error;
 
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
@@ -192,6 +193,10 @@ impl Cartridge {
     pub fn get_prg_rom(&self) -> Vec<u8> {
         self.prg_rom.clone()
     }
+
+    pub fn dump_chr_rom(&self) -> &Vec<u8> {
+        &self.chr_rom
+    }
 }
 
 impl Reset for Cartridge {
@@ -213,19 +218,12 @@ impl MemAccess for Cartridge {
 
             0x8000.. => {
                 // TODO: eventually to be handled by mapper
-                // let address = if self.header.chr_rom_size == 1 {
-                //     // 16k rom only 0x8000-0xbfff are valid
-                //     address & 0xbfff & 0x7fff
-                // } else {
-                //     address & 0x7fff
-                // };
-                // self.prg_rom[address as usize - 0x8000]
-                if self.header.mapper == 0 {
-                    // self.prg_rom[address as usize - 0x8000]
-                    self.prg_rom[address as usize - 0x8000]
-                } else {
-                    self.prg_rom[address as usize & 0xbfff & 0x7fff]
+                let mut addr = address as usize - 0x8000;
+
+                if self.prg_rom.len() == 0x4000 && addr >= 0x4000 {
+                    addr &= 0x3fff;
                 }
+                self.prg_rom[addr]
             }
         }
     }
@@ -237,16 +235,25 @@ impl MemAccess for Cartridge {
             0x6000..0x8000 => self.prg_ram[address as usize - 0x6000] = data,
             0x8000.. => {
                 // TODO: eventually to be handled by mapper
-                // let address = if self.header.chr_rom_size == 1 {
-                //     // 16k rom only 0x8000-0xbfff are valid
-                //     address & 0xbfff & 0x7fff
-                // } else {
-                //     address & 0x7fff
-                // };
-                // self.prg_rom[address as usize - 0x8000] = data;
-                self.prg_rom[address as usize & 0xbfff & 0x7fff] = data;
+                let mut addr = address as usize - 0x8000;
+
+                if self.prg_rom.len() == 0x4000 && addr >= 0x4000 {
+                    addr &= 0x3fff;
+                }
+                self.prg_rom[addr] = data;
             }
         }
+    }
+}
+
+impl Debug for Cartridge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cartridge")
+            .field("header", &self.header)
+            .field("prg_rom", &self.prg_rom.len())
+            .field("chr_rom", &self.chr_rom.len())
+            .field("prg_ram", &self.prg_ram.len())
+            .finish()
     }
 }
 

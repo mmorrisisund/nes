@@ -11,7 +11,14 @@ use common::mem::MemAccess;
 use nes::Nes;
 
 fn main() {
-    run_game_rom();
+    let cartridge = cartridge::Cartridge::from_file("./game_roms/pacman.nes").unwrap();
+    println!("{:?}", cartridge.dump_chr_rom());
+    // let cartridge =
+    //     cartridge::Cartridge::from_file("./src/test_roms/cpu/instr_timing/instr_timing.nes")
+    //         .unwrap();
+    // println!("{cartridge:?}");
+
+    // run_game_rom();
     // run_test_rom();
 }
 
