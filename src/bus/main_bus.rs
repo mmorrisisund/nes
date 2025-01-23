@@ -141,6 +141,10 @@ impl Reset for MainBus {
 impl SignalProvider for MainBus {
     fn interrupt_requested(&self) -> Option<Interrupt> {
         // check for nmi first
+        let nmi = self.ppu.interrupt_requested();
+        if nmi.is_some() {
+            return nmi;
+        }
 
         // then irq
         if self.apu.interrupt_status() {

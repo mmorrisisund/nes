@@ -45,6 +45,10 @@ impl StatusRegister {
         self.0.set_flag(Status::VBLANK_STARTED);
     }
 
+    pub fn clear_vblank_started(&mut self) {
+        self.0.unset_flag(Status::VBLANK_STARTED);
+    }
+
     pub fn is_in_vblank(&self) -> bool {
         self.0.contains(Status::VBLANK_STARTED)
     }

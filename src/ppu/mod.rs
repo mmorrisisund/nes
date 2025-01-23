@@ -31,7 +31,7 @@ const SECONDARY_OAM_SIZE: usize = 32;
 const MAX_SPRITES: usize = 8;
 
 // cycles
-const VBLANK: u16 = 1;
+const VBLANK_START_CYCLE: u16 = 1;
 const VISIBLE_START: u16 = 1; // 2 cycles each for 4 fetches, 32 tiles
 const VISIBLE_END: u16 = 256;
 const OAM_CLEAR_START: u16 = 1;
@@ -52,7 +52,7 @@ const CYCLE_END: u16 = 340;
 
 // scanlines
 const VISIBLE_SCANLINE_END: u16 = 239;
-const VBLANK_START: u16 = 241;
+const VBLANK_START_LINE: u16 = 241;
 const PRERENDER_LINE: u16 = 261;
 
 #[derive(Debug)]
@@ -87,6 +87,10 @@ pub struct Ppu {
     scanline: u16,
     cycle: u16,
     nmi: Cell<bool>,
+    prevent_vbl: bool,
+
+    warmup: bool,
+    total_cycles: u64,
 }
 
 impl Default for Ppu {
@@ -126,12 +130,18 @@ impl Ppu {
             vram_buffer: 0,
 
             scanline: 0,
-            cycle: 0,
+            cycle: 0, // 27 mismatch between cpu and ppu at startup
             nmi: Cell::new(false),
+            prevent_vbl: false,
+
+            warmup: true,
+            total_cycles: 0,
         }
     }
 
     pub fn clock(&mut self) {
+        self.total_cycles += 1;
+
         if self.cycle >= CYCLE_END {
             self.cycle = 0;
             self.scanline += 1;
@@ -143,8 +153,8 @@ impl Ppu {
             self.cycle += 1;
             self.tick();
 
-            if self.cycle == VBLANK {
-                if self.scanline == VBLANK_START {
+            if self.cycle == VBLANK_START_CYCLE {
+                if self.scanline == VBLANK_START_LINE {
                     self.start_vblank();
                 } else if self.scanline == PRERENDER_LINE {
                     self.end_vblank();
@@ -420,7 +430,7 @@ impl Ppu {
         // * read sprite data from secondary_oam with oam index
         // * build sprite
         let sprite_index = (self.cycle - SPRITE_FETCH_START) / 8;
-        let oam_index = (sprite_index << 4) as usize;
+        let oam_index = (sprite_index << 2) as usize;
 
         // 0HNNNN NNNNPyyy
         // |||||| |||||+++- T: Fine Y offset, the row number within a tile
@@ -478,11 +488,29 @@ impl Ppu {
     }
 
     fn start_vblank(&mut self) {
-        self.status.set_vblank_started();
-        self.nmi.set(true);
+        // println!(
+        //     "start @ {}({}): {}",
+        //     self.total_cycles,
+        //     self.total_cycles / 3,
+        //     self.warmup
+        // );
+        if !self.prevent_vbl {
+            self.status.set_vblank_started();
+            if self.control.nmi_enable() {
+                self.nmi.set(true);
+            }
+        }
+        self.prevent_vbl = false;
     }
 
     fn end_vblank(&mut self) {
+        // println!(
+        //     "end @ {}({}): {}",
+        //     self.total_cycles,
+        //     self.total_cycles / 3,
+        //     self.warmup
+        // );
+        self.warmup = false;
         self.status.clear();
         self.nmi.set(false);
     }
@@ -497,21 +525,41 @@ impl Ppu {
 impl Ppu {
     // Register 0x2000 (W)
     pub fn write_control(&mut self, value: u8) {
+        if self.warmup {
+            return;
+        }
+
+        let prior_enable = self.control.nmi_enable();
         self.control.write(value);
         self.t_addr.set_nametable_select(value);
+
+        if !self.control.nmi_enable() {
+            self.nmi.set(false);
+        } else if self.status.is_in_vblank() && !prior_enable {
+            self.nmi.set(true);
+        }
     }
 
     // Register 0x2001 (W)
     pub fn write_mask(&mut self, value: u8) {
+        if self.warmup {
+            return;
+        }
         self.mask.set_byte(value);
     }
 
     // Register 0x2002 (R)
     pub fn read_status(&mut self) -> u8 {
-        // TODO: are there more side effects?
-        // TODO: check on preventing nmi in special case
-        self.first_write = true;
-        self.peek_status()
+        let status = self.peek_status();
+
+        self.first_write = true; // `reset `latch
+        self.status.clear_vblank_started(); // reset vblank flag
+
+        if self.scanline == VBLANK_START_LINE && self.cycle == VBLANK_START_CYCLE - 1 {
+            // https://www.nesdev.org/wiki/PPU_frame_timing#VBL_Flag_Timing
+            self.prevent_vbl = true;
+        }
+        status
     }
 
     // (not mutating)
@@ -540,6 +588,9 @@ impl Ppu {
 
     // Register 0x2005 (W)
     pub fn write_scroll(&mut self, value: u8) {
+        if self.warmup {
+            return;
+        }
         if self.first_write {
             self.t_addr.set_coarse_x(value >> 3);
             self.fine_x = value & 0x07;
@@ -552,6 +603,9 @@ impl Ppu {
 
     // Register 0x2006 (W)
     pub fn write_ppu_addr(&mut self, value: u8) {
+        if self.warmup {
+            return;
+        }
         if self.first_write {
             self.t_addr.set_high(value);
         } else {
@@ -606,5 +660,30 @@ impl SignalProvider for Ppu {
 
     fn dma_requested(&self) -> Option<DmaSource> {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::blargg_test;
+
+    const TEST_ROOT: &str = "./src/test_roms/ppu";
+
+    mod vbl_nmi {
+        use super::*;
+
+        const TEST_FOLDER: &str = "/vbl_nmi/rom_singles";
+
+        blargg_test!(vbl_basics, TEST_ROOT, TEST_FOLDER, "/01-vbl_basics.nes");
+        blargg_test!(vbl_set_time, TEST_ROOT, TEST_FOLDER, "/02-vbl_set_time.nes");
+        blargg_test!(
+            vbl_clear_time,
+            TEST_ROOT,
+            TEST_FOLDER,
+            "/03-vbl_clear_time.nes"
+        );
+        blargg_test!(nmi_control, TEST_ROOT, TEST_FOLDER, "/04-nmi_control.nes");
+        blargg_test!(nmi_timing, TEST_ROOT, TEST_FOLDER, "/05-nmi_timing.nes");
+        // blargg_test!(suppression, TEST_ROOT, TEST_FOLDER, "/06-suppression.nes");
     }
 }

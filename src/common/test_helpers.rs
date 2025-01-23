@@ -118,7 +118,20 @@ impl SignalProvider for TestBusRom {
     }
 }
 
+#[macro_export]
+macro_rules! blargg_test {
+    ($name:ident, $root:expr, $folder:expr, $file:expr) => {
+        #[test]
+        fn $name() {
+            $crate::common::test_helpers::execute_blargg_test(
+                format!("{}{}{}", $root, $folder, $file).as_str(),
+            );
+        }
+    };
+}
+
 fn create_test_nes(file_path: &str) -> TestNes {
+    println!("{file_path}");
     let nes = Nes::new(file_path).unwrap();
     TestNes { nes }
 }
