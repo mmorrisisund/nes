@@ -11,6 +11,28 @@ use common::mem::MemAccess;
 use nes::Nes;
 
 fn main() {
+    run_game_rom();
+    // run_test_rom();
+}
+
+#[allow(dead_code)]
+fn run_game_rom() {
+    let mut nes = Nes::new("./game_roms/pacman.nes").unwrap();
+
+    nes.reset();
+
+    nes.audio_player.play().unwrap();
+
+    loop {
+        nes.clock_frame();
+
+        let samples = nes.bus_mut().drain_audio_buffer();
+        nes.audio_player.queue(&samples);
+    }
+}
+
+#[allow(dead_code)]
+fn run_test_rom() {
     let mut nes = Nes::new("./src/test_roms/cpu/instr_timing/instr_timing.nes").unwrap();
 
     // crate::common::test_helpers::execute_blargg_test("./src/test_roms/apu/reset/4015_cleared.nes");
