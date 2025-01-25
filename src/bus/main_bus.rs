@@ -11,7 +11,7 @@ use crate::{
 pub struct MainBus {
     ram: [u8; 0x800],
     apu: Apu,
-    ppu: Ppu,
+    pub ppu: Ppu,
     cartridge: Cartridge,
 }
 
@@ -26,6 +26,8 @@ impl MainBus {
     }
 
     pub fn load_cart(&mut self, cartridge: Cartridge) {
+        // TODO: let's do better
+        self.ppu.bus.load_chr_rom(cartridge.chr_rom.clone());
         self.cartridge = cartridge;
     }
 
@@ -35,6 +37,10 @@ impl MainBus {
         for _ in 0..3 {
             self.ppu.clock();
         }
+    }
+
+    pub fn frame_buffer(&self) -> &[u8] {
+        &self.ppu.frame().buffer
     }
 
     pub fn write_dma(&mut self, value: u8, source: DmaSource) {

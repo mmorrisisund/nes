@@ -1,0 +1,124 @@
+CPU public API:
+  ✔ new -> empty state @done(24-12-14 10:47)
+  ✔ reset -> empty state with reset vector loaded (wait 7 cycles?) @done(24-12-14 10:47)
+  ☐ bus, fn bus_mut -> references to bus
+  ☐ run_next_instruction
+      remaining cycles are 0 and next instruction is empty
+         evenutally checks for dma access, interrupts
+         fetch instruction
+         decode operand
+         ~alter cycle time for jmp~
+         set cycles time: wait for base time less 1 (this cycle)
+         save instruction
+         return Waiting
+      remaining cycles are 1 and next instruction is available
+      (actually run the instruction on the last clock cycle)
+         cycle time is now zero
+         take the next instruction
+         run instruction
+         return state from instruction run (possibly adjust remaining cycle time first)
+      more than 1 cycle
+        reduce cycles by 1
+        return Waiting
+
+CPU Private API:
+  ✔ set flag, unset flag, set status @done(24-12-14 10:53)
+  ✘ read/write bus @cancelled(24-12-15 18:17)
+  ✔ decode operand: addr, cycles (adjust for cross), cross notification(bool) @done(24-12-14 14:13)
+  ✔ update zn flag @done(24-12-14 10:56)
+  ✔ run bitwise op @done(24-12-14 11:08)
+  ✔ run cmp op @done(24-12-14 11:58)
+  ✔ run branch @done(24-12-14 12:17)
+  ✔ run load type instruction @done(24-12-14 12:25)
+  ✔ push/pop stack @done(24-12-14 12:30)
+  ✔ fetch instruction - Instruction @done(24-12-14 10:56)
+  ✔ run instruction -> runstate @done(24-12-15 18:17)
+      decode operand
+      set state to normal execution
+      match opcode and perform action (some actions remaining cycle time)
+
+
+Notes
+NES {
+  cartridge,
+  cpu: CPU<CPUBus>
+}
+
+fn run_one_frame -> 29k cycles or 1 video frame
+  * run apu
+  * run cpu
+  * run ppu x3
+
+CPUBus {
+  ram,
+  cartridge,
+  ppu,
+  apu,
+  controller,
+}      
+
+Memory Map
+_______________ $10000  _______________
+| PRG-ROM       |       |               |
+| Upper Bank    |       |               |
+|_ _ _ _ _ _ _ _| $C000 | PRG-ROM       |
+| PRG-ROM       |       |               |
+| Lower Bank    |       |               |
+|_______________| $8000 |_______________|
+| SRAM          |       | SRAM          |
+|_______________| $6000 |_______________|
+| Expansion ROM |       | Expansion ROM |
+|_______________| $4020 |_______________|
+| I/O Registers |       |               |
+|_ _ _ _ _ _ _ _| $4000 |               |
+| Mirrors       |       | I/O Registers |
+| $2000-$2007   |       |               |
+|_ _ _ _ _ _ _ _| $2008 |               |
+| I/O Registers |       |               |
+|_______________| $2000 |_______________|
+| Mirrors       |       |               |
+| $0000-$07FF   |       |               |
+|_ _ _ _ _ _ _ _| $0800 |               |
+| RAM           |       | RAM           |
+|_ _ _ _ _ _ _ _| $0200 |               |
+| Stack         |       |               |
+|_ _ _ _ _ _ _ _| $0100 |               |
+| Zero Page     |       |               |
+|_______________| $0000 |_______________|
+
+ 
+Address range	    Size	   Description	            Mapped by
+| $0000-$0FFF	  | $1000	|  Pattern table 0	        Cartridge  (CHR-ROM)
+| $1000-$1FFF	  | $1000	|  Pattern table 1	        Cartridge  (CHR-ROM)
+|_______________|      
+| $2000-$23FF	  | $0400	|  Nametable 0	            Cartridge  (VRAM)
+| $2400-$27FF	  | $0400	|  Nametable 1	            Cartridge  (VRAM)
+| $2800-$2BFF	  | $0400	|  Nametable 2	            Cartridge  (VRAM)
+| $2C00-$2FFF	  | $0400	|  Nametable 3	            Cartridge  (VRAM)
+|_______________|      
+| $3000-$3EFF	  | $0F00	|  Unused 	                Cartridge
+|_______________| 
+| $3F00-$3F1F	  | $0020	|  Palette RAM indexes	    Internal to PPU
+| $3F20-$3FFF	  | $00E0	|  Mirrors of $3F00-$3F1F	  Internal to PPU
+
+Nametable contains 960 tiles.
+  -- Each byte in nametable contains tile id.
+    -- Tile Id is address in pattern table. 
+    -- Pattern table has actual "pictures".
+  -- Since it uses one byte it can only reference 256 tiles per bank (2 banks)
+  -- 64 bytes of nametable used for specifying color information 
+  -- 960 + 64 = 1024 bytes
+  -- Entirely populated by CPU using Addr/Data registers
+  -- The nametable is essentially the state of the screen minus the sprites
+
+  -- Attribute Table
+    -- Made up of 16x16 meta-tiles (sometimes 32x32)
+    -- 
+
+
+  -- Algorithm for drawing 
+    -- Determine nametable to use from Control register
+    -- Determine CHR-ROM bank to use from Control register
+    -- Read 960 bytes from nametable and draw 32x30 tile screen
+
+

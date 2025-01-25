@@ -7,7 +7,10 @@ use std::cell::Cell;
 
 use frame::Frame;
 use registers::{
-    address::AddressRegister, ctrl::ControlRegister, mask::MaskRegister, status::StatusRegister,
+    address::{self, AddressRegister},
+    ctrl::ControlRegister,
+    mask::MaskRegister,
+    status::StatusRegister,
 };
 use sprite::Sprite;
 use tile::Tile;
@@ -20,10 +23,11 @@ use crate::{
     },
 };
 
-const WIDTH: u16 = 256;
-const HEIGHT: u16 = 240;
-const TOTAL_PIXELS: usize = (WIDTH * HEIGHT) as usize;
+pub const WIDTH: u32 = 256;
+pub const HEIGHT: u32 = 240;
+pub const TOTAL_PIXELS: usize = (WIDTH * HEIGHT) as usize;
 const PALETTE_START: u16 = 0x3f00;
+const PALETTE_END: u16 = 0x3f20;
 const SPRITE_PALETTE: u16 = 0x0010;
 const BG_PALETTE: u16 = 0x0000;
 
@@ -57,7 +61,7 @@ const PRERENDER_LINE: u16 = 261;
 
 #[derive(Debug)]
 pub struct Ppu {
-    bus: PpuBus,
+    pub bus: PpuBus,
     control: ControlRegister,
     mask: MaskRegister,
     status: StatusRegister,
@@ -163,6 +167,110 @@ impl Ppu {
         }
     }
 
+    pub fn frame(&self) -> &Frame {
+        &self.frame
+    }
+
+    pub fn load_name_tables(&self, pixels: &mut [u8]) {
+        pub const NT_SIZE: u16 = 0x0400;
+
+        for i in 0..4 {
+            // x, y normall come from cycle, scanline
+            let base_addr = address::NT_START + (i as u16) * NT_SIZE;
+            let x_offset = (i % 2) * WIDTH;
+            let y_offset = (i / 2) * HEIGHT;
+
+            for addr in base_addr..(base_addr + NT_SIZE - 64) {
+                let x_scroll = addr & address::COARSE_X_MASK;
+                let y_scroll = (addr & address::COARSE_Y_MASK) >> 5;
+
+                let pattern_table_id = self.bus.peek(addr) as u16;
+                let pattern_address = self.control.bg_pattern_addr() | (pattern_table_id << 4);
+
+                let nt_select = addr & (address::NT_X_MASK | address::NT_Y_MASK);
+                let attr_base = address::ATTR_START | nt_select; // attribute table start address
+                let attr_tile = ((y_scroll & 0xFC) << 1) + (x_scroll >> 2); // hi 3 bits of y, hi 3 bits of x
+                let attribute = u16::from(self.bus.peek(attr_base + attr_tile));
+                let palette_selector = (x_scroll & 0x02) | ((y_scroll & 0x02) << 1);
+                let palette_addr = ((attribute >> palette_selector) & 0x03) << 2;
+
+                let tile_num = x_scroll + (y_scroll << 5);
+                let tile_x = (tile_num % 32) << 3;
+                let tile_y = (tile_num / 32) << 3;
+
+                for y in 0..8 {
+                    let tile_addr = pattern_address + y; // this sets the fine y part of address
+                    let tile_lo = self.bus.peek(tile_addr);
+                    let tile_hi = self.bus.peek(tile_addr + 8);
+                    for x in 0..8 {
+                        let tile_palette = ((tile_hi >> x) & 1) << 1 | (tile_lo >> x) & 1;
+                        let palette = palette_addr | u16::from(tile_palette);
+                        let color = self
+                            .bus
+                            .peek(PALETTE_START | ((palette & 0x03 > 0) as u16 * palette));
+                        let x = u32::from(tile_x + (7 - x));
+                        let y = u32::from(tile_y + y);
+                        Self::set_pixel(
+                            color, // & self.mask.grayscale) | self.mask.emphasis,
+                            x + x_offset,
+                            y + y_offset,
+                            WIDTH,
+                            pixels,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn load_pattern_tables(&self, pixels: &mut [u8]) {
+        for i in 0..2 {
+            let start = (i as u16) * 0x1000;
+            let end = start + 0x1000;
+            let x_offset = i * WIDTH / 2;
+
+            for tile_addr in (start..end).step_by(16) {
+                let tile_x = ((tile_addr % 0x1000) % 256) / 2;
+                let tile_y = ((tile_addr % 0x1000) / 256) * 8;
+                for y in 0..8 {
+                    let tile_lo = self.bus.peek(tile_addr + y) as u16;
+                    let tile_hi = self.bus.peek(tile_addr + y + 8) as u16;
+                    for x in 0..8 {
+                        let palette = (((tile_hi >> x) & 0x01) << 1) | ((tile_lo >> x) & 0x01);
+                        let color = self.bus.peek(PALETTE_START | palette);
+                        let x = u32::from(tile_x + (7 - x));
+                        let y = u32::from(tile_y + y);
+                        Self::set_pixel(color, x_offset + x, y, WIDTH, pixels);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn load_palette(&self, pixels: &mut [u8]) {
+        for addr in PALETTE_START..PALETTE_END {
+            let offset = addr - PALETTE_START;
+            let x = u32::from(offset % 8) * 32;
+            let y = u32::from(offset / 8) * 32;
+            let color = self.bus.peek(addr);
+
+            for x in x..x + 32 {
+                for y in y..y + 32 {
+                    Self::set_pixel(color, x, y, WIDTH, pixels);
+                }
+            }
+        }
+    }
+
+    fn set_pixel(color: u8, x: u32, y: u32, screen_width: u32, pixels: &mut [u8]) {
+        let color = 3 * color as usize;
+        let idx = 3 * (x + y * screen_width) as usize;
+
+        pixels[idx] = SYSTEM_PALETTE[color];
+        pixels[idx + 1] = SYSTEM_PALETTE[color + 1];
+        pixels[idx + 2] = SYSTEM_PALETTE[color + 2];
+    }
+
     fn tick(&mut self) {
         let is_visible_cycle = matches!(self.cycle, VISIBLE_START..=VISIBLE_END);
         let is_bg_prefetch_cycle = matches!(self.cycle, BG_PREFETCH_START..=BG_PREFETCH_END);
@@ -257,6 +365,7 @@ impl Ppu {
         // (and is output on the PPU's address pins). Whenever the low 14 bits of v point into
         // palette RAM ($3F00-$3FFF), the PPU will continuously draw the color at that address
         // instead of the EXT input, overriding the backdrop color.
+
         let color = if (address & PALETTE_START) == PALETTE_START {
             self.bus.read(address)
         } else if self.mask.rendering_enabled() {
@@ -264,7 +373,6 @@ impl Ppu {
         } else {
             self.bus.read(PALETTE_START)
         };
-
         self.frame.set_pixel(x, y, color);
     }
 
@@ -272,7 +380,7 @@ impl Ppu {
         let x = self.cycle - 1;
         let bg_enabled = self.mask.show_background();
         let bg_clip_set = !self.mask.show_left_bg();
-        let sprite_enabled = self.mask.show_sprite();
+        let sprite_enabled = false; // self.mask.show_sprite();
         let sprite_clip_set = !self.mask.show_left_sprite();
 
         // check for left 8px clip
@@ -318,7 +426,7 @@ impl Ppu {
             self.byte_n = self.oam_addr & 0b11;
         } else if self.cycle == SPRITE_EVAL_END {
             // sprite 0 visible thing
-            self.sprite_count = (self.secondary_oam_addr >> 2) as u16; // divide by 4, 4 bytes/sprite
+            // self.sprite_count = (self.secondary_oam_addr >> 2) as u16; // divide by 4, 4 bytes/sprite
         }
 
         if self.cycle & 0x01 == 0x01 {
@@ -420,7 +528,7 @@ impl Ppu {
     fn fetch_attr_byte(&mut self) {
         let attr_addr = self.v_addr.attribute_addr();
         let palette_selector = self.v_addr.attribute_shift(); // determine quadrant in metatile
-        self.current_tile.next_palette = (self.bus.read(attr_addr) >> palette_selector) & 0b11;
+        self.current_tile.next_palette_id = (self.bus.read(attr_addr) >> palette_selector) & 0b11;
     }
 
     fn load_sprites(&mut self) {
@@ -488,12 +596,6 @@ impl Ppu {
     }
 
     fn start_vblank(&mut self) {
-        // println!(
-        //     "start @ {}({}): {}",
-        //     self.total_cycles,
-        //     self.total_cycles / 3,
-        //     self.warmup
-        // );
         if !self.prevent_vbl {
             self.status.set_vblank_started();
             if self.control.nmi_enable() {
@@ -504,12 +606,6 @@ impl Ppu {
     }
 
     fn end_vblank(&mut self) {
-        // println!(
-        //     "end @ {}({}): {}",
-        //     self.total_cycles,
-        //     self.total_cycles / 3,
-        //     self.warmup
-        // );
         self.warmup = false;
         self.status.clear();
         self.nmi.set(false);
@@ -662,6 +758,9 @@ impl SignalProvider for Ppu {
         todo!()
     }
 }
+
+#[rustfmt::skip]
+pub static SYSTEM_PALETTE: &[u8; 0x600] = include_bytes!("Composite_wiki.pal");
 
 #[cfg(test)]
 mod tests {

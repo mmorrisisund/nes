@@ -8,20 +8,20 @@ pub struct AddressRegister(u16);
 // ||| |+-------------- nametable x offset
 // ||| +--------------- nametable y offset
 // +++----------------- fine Y scroll
-const COARSE_X_MASK: u16 = 0x1f;
-const COARSE_Y_MASK: u16 = 0x3e0;
-const NT_SELECT_MASK: u16 = 0xc00;
-const NT_X_MASK: u16 = 0x400;
-const NT_Y_MASK: u16 = 0x800;
-const FINE_Y_MASK: u16 = 0x7000;
+pub const COARSE_X_MASK: u16 = 0x1f;
+pub const COARSE_Y_MASK: u16 = 0x3e0;
+pub const NT_SELECT_MASK: u16 = 0xc00;
+pub const NT_X_MASK: u16 = 0x400;
+pub const NT_Y_MASK: u16 = 0x800;
+pub const FINE_Y_MASK: u16 = 0x7000;
 #[allow(clippy::unusual_byte_groupings)]
 const H_BITS_MASK: u16 = 0b000_01_00000_11111;
 #[allow(clippy::unusual_byte_groupings)]
 const V_BITS_MASK: u16 = 0b111_10_11111_00000;
 
-const NT_START: u16 = 0x2000;
-const NT_ADDR_MASK: u16 = 0xfff;
-const ATTR_START: u16 = 0x23c0;
+pub const NT_START: u16 = 0x2000;
+pub const NT_ADDR_MASK: u16 = 0xfff;
+pub const ATTR_START: u16 = 0x23c0;
 
 impl AddressRegister {
     pub fn address(&self) -> u16 {

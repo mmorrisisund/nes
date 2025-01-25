@@ -10,15 +10,20 @@ mod util;
 use common::mem::MemAccess;
 use nes::Nes;
 
+use ppu::TOTAL_PIXELS;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::PixelFormatEnum;
+
 fn main() {
-    let cartridge = cartridge::Cartridge::from_file("./game_roms/pacman.nes").unwrap();
-    println!("{:?}", cartridge.dump_chr_rom());
+    // let cartridge = cartridge::Cartridge::from_file("./game_roms/pacman.nes").unwrap();
+
     // let cartridge =
     //     cartridge::Cartridge::from_file("./src/test_roms/cpu/instr_timing/instr_timing.nes")
     //         .unwrap();
     // println!("{cartridge:?}");
 
-    // run_game_rom();
+    run_game_rom();
     // run_test_rom();
 }
 
@@ -28,13 +33,50 @@ fn run_game_rom() {
 
     nes.reset();
 
-    nes.audio_player.play().unwrap();
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
+    let window = video_subsystem
+        .window("NES", (256 * 3) as u32, (240 * 3) as u32)
+        .position_centered()
+        .build()
+        .unwrap();
+
+    let mut canvas = window.into_canvas().present_vsync().build().unwrap();
+    let mut event_pump = sdl_context.event_pump().unwrap();
+    canvas.set_scale(3.0, 3.0).unwrap();
+
+    let creator = canvas.texture_creator();
+    let mut texture = creator
+        .create_texture_target(PixelFormatEnum::RGB24, 256, 240)
+        .unwrap();
 
     loop {
         nes.clock_frame();
+        let frame = nes.bus_mut().frame_buffer();
 
-        let samples = nes.bus_mut().drain_audio_buffer();
-        nes.audio_player.queue(&samples);
+        // let mut frame = vec![0x0; ppu::TOTAL_PIXELS * 2 * 3]; // 2 pattern tables, 3 channels RGB
+        // nes.bus_mut().ppu.load_pattern_tables(&mut frame);
+
+        // let mut frame = vec![0x0; ppu::TOTAL_PIXELS * 4 * 3]; // 4 nametables, 3 channels RGB
+        // nes.bus_mut().ppu.load_name_tables(&mut frame);
+
+        // let mut frame = vec![0x0; TOTAL_PIXELS * 3];
+        // nes.bus_mut().ppu.load_palette(&mut frame);
+
+        texture.update(None, frame, 256 * 3).unwrap();
+        canvas.copy(&texture, None, None).unwrap();
+        canvas.present();
+
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::ESCAPE),
+                    ..
+                } => std::process::exit(0),
+                _ => {}
+            }
+        }
     }
 }
 
@@ -87,3 +129,20 @@ fn run_test_rom() {
         print!("{out}");
     }
 }
+#[rustfmt::skip]
+
+pub static SYSTEM_PALETTE: [(u8,u8,u8); 64] = [
+   (0x80, 0x80, 0x80), (0x00, 0x3d, 0xa6), (0x00, 0x12, 0xb0), (0x44, 0x00, 0x96), (0xa1, 0x00, 0x5e),
+   (0xc7, 0x00, 0x28), (0xba, 0x06, 0x00), (0x8c, 0x17, 0x00), (0x5c, 0x2f, 0x00), (0x10, 0x45, 0x00),
+   (0x05, 0x4a, 0x00), (0x00, 0x47, 0x2e), (0x00, 0x41, 0x66), (0x00, 0x00, 0x00), (0x05, 0x05, 0x05),
+   (0x05, 0x05, 0x05), (0xc7, 0xc7, 0xc7), (0x00, 0x77, 0xff), (0x21, 0x55, 0xff), (0x82, 0x37, 0xfa),
+   (0xeb, 0x2f, 0xb5), (0xff, 0x29, 0x50), (0xff, 0x22, 0x00), (0xd6, 0x32, 0x00), (0xc4, 0x62, 0x00),
+   (0x35, 0x80, 0x00), (0x05, 0x8f, 0x00), (0x00, 0x8a, 0x55), (0x00, 0x99, 0xcc), (0x21, 0x21, 0x21),
+   (0x09, 0x09, 0x09), (0x09, 0x09, 0x09), (0xff, 0xff, 0xff), (0x0f, 0xd7, 0xff), (0x69, 0xa2, 0xff),
+   (0xd4, 0x80, 0xff), (0xff, 0x45, 0xf3), (0xff, 0x61, 0x8b), (0xff, 0x88, 0x33), (0xff, 0x9c, 0x12),
+   (0xfa, 0xbc, 0x20), (0x9f, 0xe3, 0x0e), (0x2b, 0xf0, 0x35), (0x0c, 0xf0, 0xa4), (0x05, 0xfb, 0xff),
+   (0x5e, 0x5e, 0x5e), (0x0d, 0x0d, 0x0d), (0x0d, 0x0d, 0x0d), (0xff, 0xff, 0xff), (0xa6, 0xfc, 0xff),
+   (0xb3, 0xec, 0xff), (0xda, 0xab, 0xeb), (0xff, 0xa8, 0xf9), (0xff, 0xab, 0xb3), (0xff, 0xd2, 0xb0),
+   (0xff, 0xef, 0xa6), (0xff, 0xf7, 0x9c), (0xd7, 0xe8, 0x95), (0xa6, 0xed, 0xaf), (0xa2, 0xf2, 0xda),
+   (0x99, 0xff, 0xfc), (0xdd, 0xdd, 0xdd), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
+];

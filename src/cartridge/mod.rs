@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
 
-use crate::common::mem::{MemAccess, Reset};
+use crate::common::mem::{MemAccess, Memory, Reset};
 pub use error::CartridgeError;
 
 #[derive(Debug)]
@@ -125,7 +125,7 @@ impl INesHeader {
 pub struct Cartridge {
     header: INesHeader,
     prg_rom: Vec<u8>,
-    chr_rom: Vec<u8>,
+    pub chr_rom: Memory,
     prg_ram: Vec<u8>,
 }
 
@@ -147,7 +147,7 @@ impl Cartridge {
                 let mut prg_rom = vec![0; header.prg_rom_size as usize * 16 * 1024];
                 file.read_exact(&mut prg_rom)?;
 
-                let mut chr_rom = vec![0; header.chr_rom_size as usize * 8 * 1024];
+                let mut chr_rom = Memory::from(vec![0; header.chr_rom_size as usize * 8 * 1024]);
                 file.read_exact(&mut chr_rom)?;
 
                 // TODO: load sram (saved data; batter pack)
@@ -178,7 +178,7 @@ impl Cartridge {
         Self {
             header: INesHeader::empty(),
             prg_rom: Vec::new(),
-            chr_rom: Vec::new(),
+            chr_rom: Memory::new(),
             prg_ram: Vec::new(),
         }
     }
@@ -251,7 +251,7 @@ impl Debug for Cartridge {
         f.debug_struct("Cartridge")
             .field("header", &self.header)
             .field("prg_rom", &self.prg_rom.len())
-            .field("chr_rom", &self.chr_rom.len())
+            .field("chr_rom", &self.chr_rom)
             .field("prg_ram", &self.prg_ram.len())
             .finish()
     }
