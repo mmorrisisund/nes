@@ -12,50 +12,47 @@
 ///
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Pattern {
-    pub low: u8,
-    pub high: u8,
+pub struct BitPlane {
+    pub id: u16,
+    pub low: u16,
+    pub high: u16,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Tile {
-    pub pattern_address: u16, // address of next pattern
-    pub next_palette_id: u8,
-    pub next_pattern: Pattern, // next pattern
+    pub next_pattern: BitPlane,
+    pub next_palette: u8,
 
-    palette_hi: u16, // current palette
-    palette_lo: u16, // current palette
-    pattern_hi: u16, // high bit plane of pattern data
-    pattern_lo: u16, // low bit plane of pattern data
+    pattern: BitPlane,
+    palette: BitPlane,
 }
 
 impl Tile {
     pub fn shift(&mut self) {
-        self.palette_lo <<= 1;
-        self.palette_hi <<= 1;
+        self.palette.low <<= 1;
+        self.palette.high <<= 1;
 
-        self.pattern_lo <<= 1;
-        self.pattern_hi <<= 1;
+        self.pattern.low <<= 1;
+        self.pattern.high <<= 1;
     }
 
     pub fn load_next_tile(&mut self) {
-        self.palette_lo |= (self.next_palette_id as u16 & 0b01) * 0xff;
-        self.palette_hi |= (self.next_palette_id as u16 & 0b10) * 0xff;
+        self.palette.low |= (self.next_palette as u16 & 0b01) * 0xff;
+        self.palette.high |= ((self.next_palette as u16 & 0b10) >> 1) * 0xff;
 
-        self.pattern_lo |= self.next_pattern.low as u16;
-        self.pattern_hi |= self.next_pattern.high as u16;
+        self.pattern.low |= self.next_pattern.low;
+        self.pattern.high |= self.next_pattern.high;
     }
 
-    pub fn pixel_color(&self, offset: u8) -> u8 {
-        let offset = offset as u16;
-        let color_lo = ((self.pattern_lo << offset) & 0x8000) >> 15;
-        let color_hi = ((self.pattern_hi << offset) & 0x8000) >> 14;
-        let color = color_hi | color_lo;
+    pub fn pixel_color(&self, offset: u8) -> (u8, u8) {
+        let offset = 15 - offset;
 
-        let palette_lo = ((self.palette_lo << offset) & 0x8000) >> 13;
-        let palette_hi = ((self.palette_hi << offset) & 0x8000) >> 12;
-        let palette = palette_hi | palette_lo;
+        let color = ((self.pattern.high >> offset) & 0x1) << 1 | (self.pattern.low >> offset) & 0x1;
+        let color = if color & 3 > 0 { color } else { 0 };
 
-        (palette | color) as u8
+        let palette =
+            ((self.palette.high >> offset) & 0x1) << 1 | (self.palette.low >> offset) & 0x1;
+
+        (palette as u8, color as u8)
     }
 }

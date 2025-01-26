@@ -28,20 +28,12 @@ impl AddressRegister {
         self.0 & 0x3fff
     }
 
-    pub fn get_horizontal_bits(&self) -> u16 {
-        self.0 & H_BITS_MASK
+    pub fn copy_x(&mut self, other: AddressRegister) {
+        self.0 = (self.0 & !H_BITS_MASK) | other.0 & H_BITS_MASK
     }
 
-    pub fn set_horizontal_bits(&mut self, value: u16) {
-        self.0 = (self.0 & !H_BITS_MASK) | value;
-    }
-
-    pub fn get_vertical_bits(&self) -> u16 {
-        self.0 & V_BITS_MASK
-    }
-
-    pub fn set_vertical_bits(&mut self, value: u16) {
-        self.0 = (self.0 & !V_BITS_MASK) | value;
+    pub fn copy_y(&mut self, other: AddressRegister) {
+        self.0 = (self.0 & !V_BITS_MASK) | other.0 & V_BITS_MASK
     }
 
     pub fn increment_addr(&mut self, offset: u8) {
@@ -52,11 +44,13 @@ impl AddressRegister {
     // This means that bits 0-4 count from 0 to 31 across a single nametable, and bit 10 selects the current nametable horizontally.
     // https://www.nesdev.org/wiki/PPU_scrolling#Coarse_X_increment
     pub fn increment_x(&mut self) {
-        if (self.0 & 0x1f) == 0x1f {
-            self.0 &= !0x1f; // set x to 0
+        let coarse_x = self.coarse_x() as u8;
+
+        if coarse_x == 31 {
+            self.set_coarse_x(0);
             self.0 ^= 0x400; // switch x nametable
         } else {
-            self.0 += 1;
+            self.set_coarse_x(coarse_x + 1);
         }
     }
 
@@ -65,22 +59,23 @@ impl AddressRegister {
     // Bits 12-14 are fine Y. Bits 5-9 are coarse Y. Bit 11 selects the vertical nametable.
     // https://www.nesdev.org/wiki/PPU_scrolling#Y_increment
     pub fn increment_y(&mut self) {
-        // fine y < 7
-        if (self.0 & 0x7000) != 0x7000 {
-            self.0 += 0x1000; // increment fine y
+        let fine_y = self.get_fine_y();
+
+        if fine_y < 7 {
+            self.set_fine_y(fine_y + 1);
         } else {
-            self.0 &= !0x7000; // set fine y to 0
-            let mut y = (self.0 & 0x03e0) >> 5; // coarse y
-                                                // Row 29 is the last row of tiles in a nametable.
-            if y == 29 {
-                y = 0; // set coarse y to 0
-                self.0 ^= 0x8000; // switch y nametable
-            } else if y == 31 {
-                y = 0;
+            self.set_fine_y(0);
+
+            let coarse_y = (self.0 & 0x03e0) >> 5; // coarse y
+                                                   // Row 29 is the last row of tiles in a nametable.
+            if coarse_y == 29 {
+                self.set_coarse_y(0);
+                self.0 ^= 0x800; // switch y nametable
+            } else if coarse_y == 31 {
+                self.set_coarse_y(0);
             } else {
-                y += 1;
+                self.set_coarse_y(coarse_y as u8 + 1);
             }
-            self.0 = (self.0 & !0x03e0) | (y << 5);
         }
     }
 
@@ -110,7 +105,7 @@ impl AddressRegister {
     // gets palette index for given quadrant of attribute byte
     // attr_value = (bottomright << 6) | (bottomleft << 4) | (topright << 2) | (topleft << 0)
     pub fn attribute_shift(&self) -> u16 {
-        (self.0 & self.coarse_x() & 0x02) | (self.0 & self.coarse_y() & 0x04)
+        (self.coarse_y() & 0x02) << 1 | (self.coarse_x() & 0x02)
     }
 
     pub fn set_high(&mut self, value: u8) {
@@ -130,7 +125,7 @@ impl AddressRegister {
     }
 
     pub fn coarse_y(&self) -> u16 {
-        (self.0 & COARSE_Y_MASK) >> 4
+        (self.0 & COARSE_Y_MASK) >> 5 // FIXME: pretty sure this should be a shift of 5, but looks worse
     }
 
     pub fn set_coarse_y(&mut self, value: u8) {

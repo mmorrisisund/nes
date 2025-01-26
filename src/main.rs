@@ -29,7 +29,7 @@ fn main() {
 
 #[allow(dead_code)]
 fn run_game_rom() {
-    let mut nes = Nes::new("./game_roms/pacman.nes").unwrap();
+    let mut nes = Nes::new("./game_roms/smb1.nes").unwrap();
 
     nes.reset();
 
