@@ -1,11 +1,3 @@
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Sprite {
-    pub x: u16,
-    pub y: u16,
-    pub tile_lo: u8,
-    pub tile_hi: u8,
-    pub palette: u8,
-    pub has_priority: bool,
     pub flip_horizontal: bool,
     pub flip_vertical: bool,
 }
