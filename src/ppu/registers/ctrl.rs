@@ -73,7 +73,7 @@ impl ControlRegister {
         }
     }
 
-    pub fn sprite_size(&self) -> u16 {
+    pub fn sprite_height(&self) -> u16 {
         match self.0.contains(Control::SPRITE_SIZE) {
             true => 16,
             false => 8,
