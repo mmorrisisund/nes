@@ -70,23 +70,26 @@ pub struct Ppu {
     t_addr: AddressRegister, // internal t register
     first_write: bool,       // internal w register
     fine_x: u8,              // internal x register
-    oam_addr: u8,
+    oam_idx: u8,
     oam_data: [u8; 256],
-    oam_fetch_buffer: u8,
+    oam_buffer: u8,
     vram_buffer: u8,
 
-    secondary_oam_addr: u8,
+    secondary_oam_idx: usize,
     secondary_oam_data: [u8; SECONDARY_OAM_SIZE],
     sprites: [Sprite; MAX_SPRITES],
-
-    // State used during sprite evaluation
-    sprite_in_range: bool,
-    sprite_n: u8,
-    byte_n: u8,
-    eval_done: bool,
     sprite_count: u16,
 
-    current_tile: Tile,
+    // State used during sprite evaluation
+    sprite_detected: bool,
+    sprite_zero_detected: bool,
+    oamaddr_hi: u8,
+    oamaddr_lo: u8,
+    eval_done: bool,
+
+    bg: Tile,
+    sprite: Sprite,
+
     frame: Frame,
 
     scanline: u16,
@@ -97,7 +100,8 @@ pub struct Ppu {
     warmup: bool,
     total_cycles: u64,
 
-    address_buffer: u16,
+    bg_addr_buffer: u16,
+    spr_addr_buffer: u16,
 }
 
 impl Default for Ppu {
@@ -117,21 +121,24 @@ impl Ppu {
             t_addr: AddressRegister::default(), // internal t register
             first_write: true,                  // internal w register
             fine_x: 0,                          // internal x register
-            oam_addr: 0,
+            oam_idx: 0,
             oam_data: [0; 256],
-            oam_fetch_buffer: 0,
+            oam_buffer: 0,
 
-            secondary_oam_addr: 0,
+            secondary_oam_idx: 0,
             secondary_oam_data: [0; 32],
             sprites: [Sprite::default(); MAX_SPRITES],
-
-            sprite_in_range: false,
-            sprite_n: 0,
-            byte_n: 0,
-            eval_done: false,
             sprite_count: 0,
 
-            current_tile: Tile::default(),
+            sprite_detected: false,
+            sprite_zero_detected: false,
+            oamaddr_hi: 0,
+            oamaddr_lo: 0,
+            eval_done: false,
+
+            bg: Tile::default(),
+            sprite: Sprite::default(),
+
             frame: Frame::new(),
 
             vram_buffer: 0,
@@ -144,7 +151,8 @@ impl Ppu {
             warmup: true,
             total_cycles: 0,
 
-            address_buffer: 0,
+            bg_addr_buffer: 0,
+            spr_addr_buffer: 0,
         }
     }
 
@@ -155,12 +163,13 @@ impl Ppu {
         match self.scanline {
             VISIBLE_SCANLINE_START..=VISIBLE_SCANLINE_END => {
                 self.tick_background();
+                self.tick_sprite();
 
                 if self.mask.rendering_enabled() {
                     if is_visible_cycle {
                         self.render_pixel();
                     }
-                    self.current_tile.shift();
+                    self.bg.shift();
                 }
             }
             VBLANK_START_LINE if self.cycle == VBLANK_START_CYCLE => self.start_vblank(),
@@ -169,6 +178,7 @@ impl Ppu {
                     self.end_vblank();
                 }
                 self.tick_background();
+                self.tick_sprite();
             }
             262 => self.scanline = 0,
             _ => {}
@@ -276,6 +286,98 @@ impl Ppu {
         }
     }
 
+    pub fn load_oam(&self, pixels: &mut [u8]) {
+        for (i, oamdata) in self.oam_data.chunks(4).enumerate() {
+            if let [y, tile_index, attr, x] = oamdata {
+                let sprite_x = u32::from(*x);
+                let sprite_y = u32::from(*y);
+                let tile_index = u16::from(*tile_index);
+                let palette = ((attr & 0x03) << 2) | 0x10;
+                let bg_priority = (attr & 0x20) == 0x20;
+                let flip_horizontal = (attr & 0x40) == 0x40;
+                let flip_vertical = (attr & 0x80) == 0x80;
+
+                let height = self.control.sprite_height();
+                let tile_addr = if height == 16 {
+                    // Use bit 0 of tile index to determine pattern table
+                    ((tile_index & 0x01) * 0x1000) | ((tile_index & 0xFE) << 4)
+                } else {
+                    self.control.sprite_pattern_addr() | (tile_index << 4)
+                };
+
+                // sprites[i] = Sprite {
+                //     x: sprite_x,
+                //     y: sprite_y,
+                //     tile_addr,
+                //     palette,
+                //     bg_priority,
+                //     flip_horizontal,
+                //     flip_vertical,
+                //     ..Sprite::default()
+                // };
+
+                let tile_x = (i % 8) as u32 * 8;
+                let tile_y = (i / 8) as u32 * 8;
+                for y in 0..8 {
+                    let mut line_offset = if flip_vertical {
+                        (height as u16) - 1 - y
+                    } else {
+                        y
+                    };
+                    if height == 16 && line_offset >= 8 {
+                        line_offset += 8;
+                    }
+                    let tile_lo = self.bus.peek(tile_addr + line_offset);
+                    let tile_hi = self.bus.peek(tile_addr + line_offset + 8);
+                    let y = u32::from(y);
+                    for x in 0..8 {
+                        // let spr_color = (((tile_hi >> x) & 0x01) << 1) | ((tile_lo >> x) & 0x01);
+                        let spr_color = if flip_horizontal {
+                            (((tile_hi >> x) & 0x01) << 1) | ((tile_lo >> x) & 0x01)
+                        } else {
+                            (((tile_hi << x) & 0x80) >> 6) | ((tile_lo << x) & 0x80) >> 7
+                        };
+                        let palette = palette + spr_color;
+                        let color = self.bus.peek(
+                            PALETTE_START | ((palette & 0x03 > 0) as u16 * u16::from(palette)),
+                        );
+
+                        Self::set_pixel(color, tile_x + x, tile_y + y, 64, pixels);
+
+                        // let x = sprite_x + x;
+                        // let y = sprite_y + y;
+                        // let show_left_bg = self.mask.show_left_bg();
+                        // let show_left_spr = self.mask.show_left_sprite();
+                        // let show_bg = self.mask.show_background();
+                        // let show_spr = self.mask.show_sprite();
+                        // let fine_x = self.fine_x;
+
+                        // let left_clip_bg = x < 8 && !show_left_bg;
+                        // let bg_color = if show_bg && !left_clip_bg {
+                        //     ((((self.tile_shift_hi << fine_x) & 0x8000) >> 14)
+                        //         | (((self.tile_shift_lo << fine_x) & 0x8000) >> 15))
+                        //         as u8
+                        // } else {
+                        //     0
+                        // };
+
+                        // let left_clip_spr = x < 8 && !show_left_spr;
+                        // if show_spr && !left_clip_spr && x < Ppu::WIDTH && y < Ppu::HEIGHT {
+                        //     let color = if bg_color == 0 || !bg_priority {
+                        //         color
+                        //     } else if (fine_x + ((x & 0x07) as u16)) < 8 {
+                        //         self.prev_palette + bg_color
+                        //     } else {
+                        //         self.curr_palette + bg_color
+                        //     };
+                        //     Self::set_pixel(u16::from(color), x, y, Ppu::WIDTH, sprite_nametable);
+                        // }
+                    }
+                }
+            }
+        }
+    }
+
     fn set_pixel(color: u8, x: u32, y: u32, screen_width: u32, pixels: &mut [u8]) {
         let color = 3 * color as usize;
         let idx = 3 * (x + y * screen_width) as usize;
@@ -288,7 +390,7 @@ impl Ppu {
     fn tick_background(&mut self) {
         match self.cycle {
             VISIBLE_START..=VISIBLE_END | BG_PREFETCH_START..=BG_PREFETCH_END => {
-                self.execute_bg_cycle();
+                self.fetch_bg();
             }
             COPY_X => {
                 if self.mask.rendering_enabled() {
@@ -304,6 +406,25 @@ impl Ppu {
             ODD_SKIP_CYCLE => self.cycle = CYCLE_END,
             _ => {}
         }
+    }
+
+    fn tick_sprite(&mut self) {
+        if self.mask.rendering_enabled() {
+            match self.cycle {
+                OAM_CLEAR_START..=OAM_CLEAR_END if !self.is_prerender() => {
+                    self.clear_secondary_oam();
+                }
+                SPRITE_EVAL_START..=SPRITE_EVAL_END if !self.is_prerender() => {
+                    self.evaluate_sprites()
+                }
+                SPRITE_FETCH_START..=SPRITE_FETCH_END => self.fetch_sprite(),
+                _ => {}
+            }
+        }
+    }
+
+    fn is_prerender(&self) -> bool {
+        self.scanline == PRERENDER_LINE
     }
 
     fn render_pixel(&mut self) {
@@ -327,88 +448,109 @@ impl Ppu {
     }
 
     fn color_address(&self) -> u16 {
-        let (palette, color) = self
+        let (bg_palette, bg_color) = self
             .mask
             .show_background()
-            .then(|| self.current_tile.pixel_color(self.fine_x))
+            .then(|| self.bg.pixel_color(self.fine_x))
             .unwrap_or_default();
 
-        // get sprite colors
+        let sprite =
+            if let Some(sprite) = self.mask.show_sprite().then(|| self.get_sprite()).flatten() {
+                sprite
+            } else {
+                &Sprite::default()
+            };
+        let (spr_palette, spr_color) = sprite.pixel_color();
 
         // choose between the two, clipping decided here too
+        let (palette, color) = match (bg_color, spr_color) {
+            (0, 0) => (0, 0),
+            (0, _) => (spr_palette, spr_color),
+            (_, 0) => (bg_palette, bg_color),
+            _ => {
+                // FIXME: if sprite 0 applies, set status register
+
+                if sprite.has_priority() {
+                    (spr_palette, spr_color)
+                } else {
+                    (bg_palette, bg_color)
+                }
+            }
+        };
 
         // return addr
         PALETTE_START | ((palette << 2) | color) as u16
     }
 
     fn color_address_old(&self) -> u16 {
-        let x = self.cycle - 1;
-        let bg_enabled = self.mask.show_background();
-        let bg_clip_set = !self.mask.show_left_bg();
-        let sprite_enabled = false; // self.mask.show_sprite();
-        let sprite_clip_set = !self.mask.show_left_sprite();
+        // let x = self.cycle - 1;
+        // let bg_enabled = self.mask.show_background();
+        // let bg_clip_set = !self.mask.show_left_bg();
+        // let sprite_enabled = false; // self.mask.show_sprite();
+        // let sprite_clip_set = !self.mask.show_left_sprite();
 
-        // check for left 8px clip
-        let bg_hide_left = x < 8 && bg_clip_set;
-        // let bg_color = if bg_enabled & !bg_hide_left {
-        //     self.current_tile.pixel_color(self.fine_x) as u16
-        // } else {
-        //     0
+        // // check for left 8px clip
+        // let bg_hide_left = x < 8 && bg_clip_set;
+        // // let bg_color = if bg_enabled & !bg_hide_left {
+        // //     self.current_tile.pixel_color(self.fine_x) as u16
+        // // } else {
+        // //     0
+        // // };
+        // let bg_color = 0;
+
+        // let sprite_hide_left = x < 8 && sprite_clip_set;
+        // if sprite_enabled && !sprite_hide_left {
+        //     for sprite in self.sprites.iter().take(self.oamaddr_hi.into()) {
+        //         if x < sprite.x {
+        //             continue;
+        //         }
+
+        //         let x_offset = x.saturating_sub(sprite.x) as u8;
+        //         let sprite_color = sprite.pixel_color(x_offset) as u16;
+
+        //         // TODO: sprite zero hit check
+
+        //         if bg_color == 0 || sprite.has_priority {
+        //             if sprite_color == 0 {
+        //                 return PALETTE_START;
+        //             } else {
+        //                 return PALETTE_START | SPRITE_PALETTE | sprite_color;
+        //             }
+        //         }
+        //     }
         // };
-        let bg_color = 0;
-
-        let sprite_hide_left = x < 8 && sprite_clip_set;
-        if sprite_enabled && !sprite_hide_left {
-            for sprite in self.sprites.iter().take(self.sprite_count.into()) {
-                if x < sprite.x {
-                    continue;
-                }
-
-                let x_offset = x.saturating_sub(sprite.x) as u8;
-                let sprite_color = sprite.pixel_color(x_offset) as u16;
-
-                // TODO: sprite zero hit check
-
-                if bg_color == 0 || sprite.has_priority {
-                    if sprite_color == 0 {
-                        return PALETTE_START;
-                    } else {
-                        return PALETTE_START | SPRITE_PALETTE | sprite_color;
-                    }
-                }
-            }
-        };
-        PALETTE_START | BG_PALETTE | bg_color
+        // PALETTE_START | BG_PALETTE | bg_color
+        0
     }
 
     /// Fetch 4 tiles and write out shift registers every 8th cycle.
     /// Each tile fetch takes 2 cycles.
-    fn execute_bg_cycle(&mut self) {
+    fn fetch_bg(&mut self) {
         match self.cycle & 0x07 {
             1 => {
-                self.current_tile.load_next_tile();
-                self.address_buffer = self.v_addr.nametable_addr();
+                self.bg.load_next_tile();
+                self.bg_addr_buffer = self.v_addr.nametable_addr();
             }
             2 => {
-                self.current_tile.next_pattern.id = self.bus.read(self.address_buffer) as u16;
+                self.bg.next_pattern.id = self.bus.read(self.bg_addr_buffer) as u16;
             }
-            3 => self.address_buffer = self.v_addr.attribute_addr(),
+            3 => self.bg_addr_buffer = self.v_addr.attribute_addr(),
             4 => {
                 let palette_selector = self.v_addr.attribute_shift(); // determine quadrant in metatile
 
-                self.current_tile.next_palette = self.bus.read(self.address_buffer);
-                self.current_tile.next_palette >>= palette_selector;
-                self.current_tile.next_palette &= 0b11;
+                self.bg.next_palette = self.bus.read(self.bg_addr_buffer);
+                self.bg.next_palette >>= palette_selector;
+                self.bg.next_palette &= 0b11;
             }
             5 => {
-                self.address_buffer = self.control.bg_pattern_addr()
-                    | (self.current_tile.next_pattern.id << 4)
+                self.bg_addr_buffer = self.control.bg_pattern_addr()
+                    | (self.bg.next_pattern.id << 4)
                     | self.v_addr.get_fine_y() as u16;
             }
-            6 => self.current_tile.next_pattern.low = self.bus.read(self.address_buffer) as u16,
-            7 => self.address_buffer += 8,
+            6 => self.bg.next_pattern.low = self.bus.read(self.bg_addr_buffer) as u16,
+            7 => self.bg_addr_buffer += 8,
             _ => {
-                self.current_tile.next_pattern.high = self.bus.read(self.address_buffer) as u16;
+                self.bg.next_pattern.high = self.bus.read(self.bg_addr_buffer) as u16;
 
                 if self.mask.rendering_enabled() {
                     self.v_addr.increment_x();
@@ -420,183 +562,249 @@ impl Ppu {
         }
     }
 
-    fn tick(&mut self) {
-        let is_sprite_fetch_cycle = matches!(self.cycle, SPRITE_FETCH_START..=SPRITE_FETCH_END);
-        let is_dummy_sprite_cycle = matches!(self.cycle, BG_PREFETCH_START..=CYCLE_END);
-
-        let is_visible_scanline = self.scanline <= VISIBLE_SCANLINE_END;
-        let is_prerender_scanline = self.scanline == PRERENDER_LINE;
-        let is_render_scanline = is_visible_scanline || is_prerender_scanline;
-
-        if self.mask.rendering_enabled() {
-            // sprite stuff
-            if is_visible_scanline {
-                match self.cycle {
-                    OAM_CLEAR_START..=OAM_CLEAR_END => {
-                        self.oam_fetch_buffer = 0xff;
-                        self.secondary_oam_data.fill(0xff);
-                    }
-                    SPRITE_EVAL_START..=SPRITE_EVAL_END => self.evaluate_sprites(),
-                    SPRITE_FETCH_START..=SPRITE_FETCH_END => self.oam_addr = 0,
-                    _ => {}
-                }
-            }
-
-            if is_render_scanline {
-                if is_sprite_fetch_cycle {
-                    // possibly clear sprite hit tracker
-                    self.fetch_sprite();
-                } else if is_dummy_sprite_cycle {
-                    self.oam_fetch_buffer = self.secondary_oam_data[0];
-                }
-            }
+    fn clear_secondary_oam(&mut self) {
+        if self.cycle % 2 == 0 {
+            self.secondary_oam_data[self.secondary_oam_idx] = self.oam_buffer;
+            self.secondary_oam_idx += 1;
+        } else {
+            self.oam_buffer = 0xff;
         }
     }
 
     // https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
     fn evaluate_sprites(&mut self) {
         if self.cycle == SPRITE_EVAL_START {
-            self.sprite_in_range = false;
-            self.secondary_oam_addr = 0;
+            self.sprite_detected = false;
+            self.sprite_zero_detected = false; // TODO: does this need locked in at end of eval period??
+            self.secondary_oam_idx = 0;
             self.eval_done = false;
-            self.sprite_n = (self.oam_addr >> 2) & 0x3f;
-            self.byte_n = self.oam_addr & 0b11;
+            self.oamaddr_hi = (self.oam_idx >> 2) & 0x3f;
+            self.oamaddr_lo = self.oam_idx & 0b11;
         } else if self.cycle == SPRITE_EVAL_END {
-            // sprite 0 visible thing
-            // self.sprite_count = (self.secondary_oam_addr >> 2) as u16; // divide by 4, 4 bytes/sprite
+            self.sprite_count = (self.secondary_oam_idx >> 2) as u16;
         }
 
         if self.cycle & 0x01 == 0x01 {
             // On odd cycles, data is read from (primary) OAM
-            self.oam_fetch_buffer = self.oam_data[self.oam_addr as usize];
+            self.oam_buffer = self.oam_data[self.oam_idx as usize];
         } else {
             // On even cycles, data is written to secondary OAM (unless secondary OAM is full, in which case it will read the value in secondary OAM instead)
-            let index = self.secondary_oam_addr as usize & 0x1f;
-            let sprite_y = self.oam_fetch_buffer as u16;
+            let index = self.secondary_oam_idx & 0x1f;
 
             if self.eval_done {
-                self.sprite_n = (self.sprite_n + 1) & 0x1f;
-                if self.secondary_oam_addr > SECONDARY_OAM_SIZE as u8 {
-                    self.oam_fetch_buffer = self.secondary_oam_data[index];
+                // self.sprite_count = (self.sprite_count + 1) & 0x1f;
+                if self.secondary_oam_idx > SECONDARY_OAM_SIZE {
+                    self.oam_buffer = self.secondary_oam_data[index];
                 }
             } else {
-                self.sprite_in_range |=
-                    !self.sprite_in_range && (sprite_y..sprite_y + 8).contains(&self.scanline);
+                // if not previously detected, interpret this byte as y
+                let sprite_y = self.oam_buffer as u16;
+                let height = self.control.sprite_height();
+                self.sprite_detected |=
+                    !self.sprite_detected && (sprite_y..sprite_y + height).contains(&self.scanline);
 
-                if self.secondary_oam_addr < SECONDARY_OAM_SIZE as u8 {
-                    self.secondary_oam_data[index] = self.oam_fetch_buffer;
+                if self.secondary_oam_idx < SECONDARY_OAM_SIZE {
+                    self.secondary_oam_data[index] = self.oam_buffer; // this is the even cycle write
+
                     // If Y-coordinate is in range, copy remaining bytes of sprite data (OAM[n][1] thru OAM[n][3]) into secondary OAM.
-                    if self.sprite_in_range {
-                        self.byte_n += 1;
-                        self.secondary_oam_addr += 1;
+                    if self.sprite_detected {
+                        self.oamaddr_lo += 1;
+                        self.secondary_oam_idx += 1;
 
-                        // sprite zero check??
-                        if self.byte_n == 0x03 {
-                            self.sprite_in_range = false;
-                            self.byte_n = 0;
-                            self.sprite_n = (self.sprite_n + 1) & 0x3f;
-                            self.eval_done |= self.sprite_n == 0x00;
+                        self.sprite_zero_detected |= self.oamaddr_hi == 0x00;
+                        if self.oamaddr_lo == 0x04 {
+                            self.sprite_detected = false;
+                            self.oamaddr_lo = 0;
+                            self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f; // max 64 sprites available
+                            self.eval_done |= self.oamaddr_hi == 0x00; // cycle around after hitting limit
                         }
                     } else {
-                        self.sprite_n = (self.sprite_n + 1) & 0x3f;
-                        self.eval_done |= self.sprite_n == 0x00;
+                        self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f; // this is how we skip 4 bytes if not found
+                        self.eval_done |= self.oamaddr_hi == 0x00;
                     }
                 } else {
-                    // read from secondary oam
-                    self.oam_fetch_buffer = self.secondary_oam_data[index];
+                    // secondary oam full, read instead
+                    self.oam_buffer = self.secondary_oam_data[index];
 
-                    if self.sprite_in_range {
+                    if self.sprite_detected {
                         self.status.set_sprite_overflow();
 
-                        self.byte_n += 1;
-                        if self.byte_n == 0x04 {
-                            self.byte_n = 0;
-                            self.sprite_n = (self.sprite_n + 1) & 0x3f;
-                            self.eval_done = true;
+                        self.oamaddr_lo += 1;
+                        if self.oamaddr_lo == 0x04 {
+                            self.oamaddr_lo = 0;
+                            self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;
+                            self.eval_done = true; // tetanes has complicated logic, but i think it evaluates to this
                         }
                     } else {
-                        self.sprite_n = (self.sprite_n + 1) & 0x3f;
-                        self.byte_n = (self.byte_n + 1) & 0x03;
-                        self.eval_done |= self.sprite_n == 0x00;
+                        // this is sprite overflow bug
+                        self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;
+                        self.oamaddr_lo = (self.oamaddr_lo + 1) & 0x03;
+                        self.eval_done |= self.oamaddr_hi == 0x00;
                     }
                 }
             }
 
-            self.oam_addr = (self.sprite_n << 2) | (self.byte_n & 0x03);
+            self.oam_idx = (self.oamaddr_hi << 2) | (self.oamaddr_lo & 0x03);
         }
     }
 
+    // Load nametables into sprite output unit.  nametable deterined from bytes in secondary oam
     fn fetch_sprite(&mut self) {
+        if self.cycle == SPRITE_FETCH_START {
+            self.secondary_oam_idx = 0;
+        }
+        let sprite_n = usize::from((self.cycle - SPRITE_FETCH_START) / 8);
+        let sprite_index = sprite_n >> 2;
+
         match self.cycle & 0x07 {
-            1 => {} // self.fetch_nt_byte(), // garbage read
-            3 => {} //self.fetch_nt_byte(), // garbage read.  why does this read nt, and not attr
-            4 => self.load_sprites(),
-            _ => {}
+            0 => {
+                // unused cycle
+                self.bg.load_next_tile();
+                self.bg_addr_buffer = self.v_addr.nametable_addr();
+            }
+            1 => {
+                // unused cycle
+                self.bg.next_pattern.id = self.bus.read(self.bg_addr_buffer) as u16;
+            }
+            2 => {
+                // unused
+                self.bg_addr_buffer = self.v_addr.attribute_addr();
+
+                self.sprite.attribute = self.secondary_oam_data[sprite_index + 2];
+            }
+            3 => {
+                // unused
+                self.bg.next_palette = self.bus.read(self.bg_addr_buffer);
+
+                self.sprite.x = self.secondary_oam_data[sprite_index + 3];
+            }
+            4 => self.spr_addr_buffer = self.get_sprite_pattern_address(),
+            5 => self.sprite.pattern.low = self.bus.read(self.spr_addr_buffer),
+            6 => self.spr_addr_buffer += 8,
+            7 => {
+                self.sprite.pattern.high = self.bus.read(self.spr_addr_buffer);
+
+                self.sprites[sprite_n] = self.sprite;
+                // for spr in self.spr_present.iter_mut().skip(sprite.x as usize).take(8) {
+                //     *spr = true;
+                // }
+            }
+            _ => unreachable!(),
         }
     }
 
-    fn load_sprites(&mut self) {
-        // - 257-320 | 64 cycles
-        // * track "fetch" index
-        // * oam index = 4 * fetch index
-        // * read sprite data from secondary_oam with oam index
-        // * build sprite
-        let sprite_index = (self.cycle - SPRITE_FETCH_START) / 8;
-        let oam_index = (sprite_index << 2) as usize;
+    fn load_sprites_old(&mut self) {
+        // // - 257-320 | 64 cycles
+        // // * track "fetch" index
+        // // * oam index = 4 * fetch index
+        // // * read sprite data from secondary_oam with oam index
+        // // * build sprite
+        // let sprite_index = (self.cycle - SPRITE_FETCH_START) / 8;
+        // let oam_index = (sprite_index << 2) as usize;
 
-        // 0HNNNN NNNNPyyy
-        // |||||| |||||+++- T: Fine Y offset, the row number within a tile
-        // |||||| ||||+---- P: Bit plane (0: less significant bit; 1: more significant bit)
-        // ||++++-++++----- N: Tile index from name table
-        // |+-------------- H: Half of pattern table (0: "left"; 1: "right")
-        // +--------------- 0: Pattern table is at $0000-$1FFF
-        if let [y, tile_idx, attr, x] = self.secondary_oam_data[oam_index..oam_index + 4] {
-            let y = y as u16;
-            let flip_vertical = (attr & 0x80) == 0x80;
-            let mut tile_idx = tile_idx as u16;
-            let height = self.control.sprite_size();
+        // // 0HNNNN NNNNPyyy
+        // // |||||| |||||+++- T: Fine Y offset, the row number within a tile
+        // // |||||| ||||+---- P: Bit plane (0: less significant bit; 1: more significant bit)
+        // // ||++++-++++----- N: Tile index from name table
+        // // |+-------------- H: Half of pattern table (0: "left"; 1: "right")
+        // // +--------------- 0: Pattern table is at $0000-$1FFF
+        // if let [y, tile_idx, attr, x] = self.secondary_oam_data[oam_index..oam_index + 4] {
+        //     let y = y as u16;
+        //     let flip_vertical = (attr & 0x80) == 0x80;
+        //     let mut tile_idx = tile_idx as u16;
+        //     let height = self.control.sprite_height();
 
-            let mut fine_y = if (y..y + height).contains(&self.scanline) {
-                self.scanline - y
-            } else {
-                0
-            };
+        //     let mut fine_y = if (y..y + height).contains(&self.scanline) {
+        //         self.scanline - y
+        //     } else {
+        //         0
+        //     };
 
-            if flip_vertical {
-                fine_y = height - fine_y - 1;
-            }
+        //     if flip_vertical {
+        //         fine_y = height - fine_y - 1;
+        //     }
 
-            // no more actual sprites left to render
-            if sprite_index >= self.sprite_count {
-                fine_y = 0;
-                tile_idx = 0xff;
-            }
+        //     // no more actual sprites left to render
+        //     if sprite_index >= self.oamaddr_hi as u16 {
+        //         fine_y = 0;
+        //         tile_idx = 0xff;
+        //     }
 
-            let tile_addr = if self.control.sprite_size() == 8 {
-                let bank = self.control.sprite_pattern_addr();
-                bank | (tile_idx << 4) | fine_y
-            } else {
-                let bank = (tile_idx & 0x01) * 0x1000;
-                bank | ((tile_idx & 0xfe) << 4) | fine_y
-            };
+        //     let tile_addr = if self.control.sprite_height() == 8 {
+        //         let bank = self.control.sprite_pattern_addr();
+        //         bank | (tile_idx << 4) | fine_y
+        //     } else {
+        //         let bank = (tile_idx & 0x01) * 0x1000;
+        //         bank | ((tile_idx & 0xfe) << 4) | fine_y
+        //     };
 
-            if sprite_index < self.sprite_count {
-                let sprite = &mut self.sprites[sprite_index as usize];
-                sprite.x = x as u16;
-                sprite.y = y;
-                sprite.tile_lo = self.bus.read(tile_addr);
-                sprite.tile_hi = self.bus.read(tile_addr + 8);
-                sprite.palette = attr & 0b11;
-                sprite.has_priority = (attr & 0x20) == 0;
-                sprite.flip_horizontal = (attr & 0x40) == 0x40;
-                sprite.flip_vertical = flip_vertical;
+        //     if sprite_index < self.oamaddr_hi as u16 {
+        //         let sprite = &mut self.sprites[sprite_index as usize];
+        //         sprite.x = x as u16;
+        //         sprite.y = y;
+        //         sprite.tile_lo = self.bus.read(tile_addr);
+        //         sprite.tile_hi = self.bus.read(tile_addr + 8);
+        //         sprite.palette = attr & 0b11;
+        //         sprite.has_priority = (attr & 0x20) == 0;
+        //         sprite.flip_horizontal = (attr & 0x40) == 0x40;
+        //         sprite.flip_vertical = flip_vertical;
 
-                // TODO: track if sprite is present for zero hit detection
-            } else {
-                let _ = self.bus.read(tile_addr);
-                let _ = self.bus.read(tile_addr + 8);
-            }
+        //         // TODO: track if sprite is present for zero hit detection
+        //     } else {
+        //         let _ = self.bus.read(tile_addr);
+        //         let _ = self.bus.read(tile_addr + 8);
+        //     }
+        // }
+    }
+
+    // https://www.nesdev.org/wiki/PPU_OAM#Byte_1
+    fn get_sprite_pattern_address(&self) -> u16 {
+        let sprite_n = (self.cycle - SPRITE_FETCH_START) / 8;
+        let oam_idx = (sprite_n as usize) << 2;
+
+        let sprite_y = self.secondary_oam_data[oam_idx] as u16;
+        let mut tile_idx = self.secondary_oam_data[oam_idx + 1] as u16;
+        let attr = self.secondary_oam_data[oam_idx + 2];
+        let height = self.control.sprite_height();
+        let pattern_table = self.control.sprite_pattern_addr();
+        let flip_vertical = (attr & 0x80) == 0x80;
+
+        let y_offset = if (sprite_y..sprite_y + height).contains(&self.scanline) {
+            self.scanline - sprite_y
+        } else {
+            0
+        };
+        let mut y_offset = if flip_vertical {
+            height - 1 - y_offset
+        } else {
+            y_offset
+        };
+
+        if sprite_n >= self.sprite_count {
+            // If there are less than 8 sprites on the next scanline, then dummy fetches to
+            // tile $FF occur for the left-over sprites.
+            y_offset = 0;
+            tile_idx = 0xff
         }
+
+        if height == 8 {
+            pattern_table | (tile_idx << 4) | y_offset
+        } else {
+            let pattern_table = (tile_idx & 0x1) & 0x1000;
+            if y_offset >= 8 {
+                y_offset += 8; // TODO: this essentially keeps the 4th bit clear.  not sure if this is technically needed.  see tetanes
+            }
+            pattern_table | ((tile_idx & 0xfe) << 4) | y_offset
+        }
+    }
+
+    fn get_sprite(&self) -> Option<&Sprite> {
+        let screen_x = self.cycle.saturating_sub(1);
+
+        self.sprites
+            .iter()
+            .take(self.sprite_count as usize)
+            .find(|sprite| screen_x < sprite.x as u16)
     }
 
     fn start_vblank(&mut self) {
@@ -670,20 +878,20 @@ impl Ppu {
     // Register 0x2003 (W)
 
     pub fn write_oam_addr(&mut self, value: u8) {
-        self.oam_addr = value;
+        self.oam_idx = value;
     }
 
     // Register 0x2004 (RW)
     pub fn read_oam_data(&self) -> u8 {
         // TODO: possibly return value from secondary oam during rendering and sprite eval
-        self.oam_data[self.oam_addr as usize]
+        self.oam_data[self.oam_idx as usize]
     }
 
     pub fn write_oam_data(&mut self, value: u8) {
         // TODO: implement glitch on write during render
         // TODO: should only write when not rendering
-        self.oam_data[self.oam_addr as usize] = value;
-        self.oam_addr = self.oam_addr.wrapping_add(1);
+        self.oam_data[self.oam_idx as usize] = value;
+        self.oam_idx = self.oam_idx.wrapping_add(1);
     }
 
     // Register 0x2005 (W)

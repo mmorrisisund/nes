@@ -122,3 +122,10 @@ Nametable contains 960 tiles.
     -- Read 960 bytes from nametable and draw 32x30 tile screen
 
 
+
+OAM
+  -- Primary OAM filled with 64 sprites worth of data (4b/sprite)
+  -- Secondary OAM (8 sprites) filled with sprites to render (Evaluation phase)
+    -- Cleared at start of each visible scanline
+  -- Secondary OAM fills sprite output unit (Fetch phase)
+    -- Sprite output units used for pixel selection against background pixel
