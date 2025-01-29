@@ -53,6 +53,18 @@ impl MainBus {
     pub fn drain_audio_buffer(&mut self) -> Vec<f32> {
         self.apu.drain_audio_buffer()
     }
+
+    fn poll_dmc_dma(&mut self) -> Option<DmaSource> {
+        self.apu.dma_status().take().map(DmaSource::Apu)
+    }
+
+    fn poll_oam_dma(&mut self) -> Option<DmaSource> {
+        self.ppu.dma_status().take().map(DmaSource::Ppu)
+    }
+
+    pub fn clear_oam_dma(&mut self) {
+        self.ppu.clear_dma_addr();
+    }
 }
 
 impl Default for MainBus {
@@ -130,9 +142,9 @@ impl MemAccess for MainBus {
             0x4013 => self.apu.write_length(Channel::Dmc, value),
             0x4015 => self.apu.write_status(value),
             0x4017 => self.apu.write_frame_counter(value),
-            0x4014 => {}                                      // ppu
-            0x4016 => {}                                      // controller
-            0x4018..0x4020 => {}                              // unused (test mode)
+            0x4014 => self.ppu.write_dma_addr(value), // ppu
+            0x4016 => {}                              // controller
+            0x4018..0x4020 => {}                      // unused (test mode)
             0x4020.. => self.cartridge.write(address, value), // cartridge
         }
     }
@@ -147,9 +159,13 @@ impl Reset for MainBus {
 impl SignalProvider for MainBus {
     fn interrupt_requested(&self) -> Option<Interrupt> {
         // check for nmi first
-        let nmi = self.ppu.interrupt_requested();
-        if nmi.is_some() {
-            return nmi;
+        // let nmi = self.ppu.interrupt_requested();
+        // if nmi.is_some() {
+        //     return nmi;
+        // }
+
+        if self.ppu.interrupt_status() {
+            return Some(Interrupt::Nmi);
         }
 
         // then irq
@@ -160,7 +176,7 @@ impl SignalProvider for MainBus {
         }
     }
 
-    fn dma_requested(&self) -> Option<DmaSource> {
-        self.apu.dma_status().take().map(DmaSource::Apu)
+    fn dma_requested(&mut self) -> Option<DmaSource> {
+        self.poll_dmc_dma().or_else(|| self.poll_oam_dma())
     }
 }

@@ -113,7 +113,7 @@ impl SignalProvider for TestBusRom {
         }
     }
 
-    fn dma_requested(&self) -> Option<super::interconnect::DmaSource> {
+    fn dma_requested(&mut self) -> Option<super::interconnect::DmaSource> {
         todo!()
     }
 }

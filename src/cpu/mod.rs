@@ -41,6 +41,10 @@ pub struct Cpu {
 
     interrupt: Option<Interrupt>,
 
+    // TODO: improve how oam dma works, i don't like this, but want to get something working
+    dma_offset: u8,
+    dma_buffer: Option<u8>,
+
     next_instruction: Option<Instruction>,
     cycles_left: u8,
     total_cycles: u64,
@@ -59,6 +63,9 @@ impl Cpu {
             reg_sp: STACK_START,
             reg_status: StatusRegister::default(),
             interrupt: None,
+
+            dma_offset: 0,
+            dma_buffer: None,
 
             next_instruction: None,
             cycles_left: 0,
@@ -899,7 +906,22 @@ impl Cpu {
                     let value = self.bus.read(address);
                     self.bus.write_dma(value, DmaSource::Apu(0)); // DmaSource addr not used
                 }
-                DmaSource::Ppu(_hi) => {}
+                DmaSource::Ppu(hi) => {
+                    if let Some(value) = self.dma_buffer {
+                        self.bus.write(0x2004, value);
+
+                        self.dma_buffer.take();
+                        self.dma_offset = self.dma_offset.wrapping_add(1);
+
+                        if self.dma_offset == 0 {
+                            self.bus.clear_oam_dma();
+                        }
+                    } else {
+                        let address = (hi << 8) | self.dma_offset as u16;
+
+                        self.dma_buffer = Some(self.bus.read(address));
+                    }
+                }
             }
         }
     }
@@ -968,8 +990,83 @@ mod tests {
         use super::*;
 
         #[test]
-        fn all_instrs() {
-            execute_blargg_test("./src/test_roms/cpu/instr_function/all_instrs.nes");
+        fn basics() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/01-basics.nes");
+        }
+
+        #[test]
+        fn implied() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/02-implied.nes");
+        }
+
+        #[test]
+        fn immediate() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/03-immediate.nes");
+        }
+
+        #[test]
+        fn zero_page() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/04-zero_page.nes");
+        }
+
+        #[test]
+        fn zp_xy() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/05-zp_xy.nes");
+        }
+
+        #[test]
+        fn absolute() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/06-absolute.nes");
+        }
+
+        #[test]
+        fn abs_xy() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/07-abs_xy.nes");
+        }
+
+        #[test]
+        fn ind_x() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/08-ind_x.nes");
+        }
+
+        #[test]
+        fn ind_y() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/09-ind_y.nes");
+        }
+
+        #[test]
+        fn branches() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/10-branches.nes");
+        }
+
+        #[test]
+        fn stack() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/11-stack.nes");
+        }
+
+        #[test]
+        fn jmp_jsr() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/12-jmp_jsr.nes");
+        }
+
+        #[test]
+        fn rts() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/13-rts.nes");
+        }
+
+        #[test]
+        fn rti() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/14-rti.nes");
+        }
+
+        #[test]
+        fn brk() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/15-brk.nes");
+        }
+
+        #[test]
+        fn special() {
+            execute_blargg_test("./src/test_roms/cpu/instr_function/rom_singles/16-special.nes");
         }
     }
 
@@ -987,8 +1084,13 @@ mod tests {
 
         // #[ignore]
         #[test]
-        fn interrupts() {
-            execute_blargg_test("./src/test_roms/cpu/interrupts/cpu_interrupts.nes");
+        fn cli_latency() {
+            execute_blargg_test("./src/test_roms/cpu/interrupts/rom_singles/1-cli_latency.nes");
+        }
+
+        #[test]
+        fn nmi_and_brk() {
+            execute_blargg_test("./src/test_roms/cpu/interrupts/rom_singles/2-nmi_and_brk.nes");
         }
     }
 

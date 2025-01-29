@@ -5,13 +5,13 @@ pub trait InterruptSignaler {
 
 pub trait SignalProvider {
     fn interrupt_requested(&self) -> Option<Interrupt>;
-    fn dma_requested(&self) -> Option<DmaSource>;
+    fn dma_requested(&mut self) -> Option<DmaSource>;
 }
 
 #[derive(Debug, PartialEq)]
 pub enum DmaSource {
     Apu(u16),
-    Ppu(u8),
+    Ppu(u16),
 }
 
 #[derive(Debug, PartialEq)]
