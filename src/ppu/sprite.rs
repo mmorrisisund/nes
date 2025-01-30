@@ -12,6 +12,8 @@ pub struct Sprite {
     pub attribute: u8,
     pub x: u8,
     pub offset: u8,
+
+    pub y: u8,
 }
 
 impl Sprite {

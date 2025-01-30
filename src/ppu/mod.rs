@@ -3,7 +3,7 @@ mod registers;
 mod sprite;
 mod tile;
 
-use std::cell::Cell;
+use std::{cell::Cell, cmp::Ordering};
 
 use frame::Frame;
 use registers::{
@@ -80,6 +80,7 @@ pub struct Ppu {
     oamaddr_hi: u8,
     oamaddr_lo: u8,
     eval_done: bool,
+    overflow_count: u8,
 
     dma_addr: Option<u16>,
 
@@ -131,6 +132,7 @@ impl Ppu {
             oamaddr_hi: 0,
             oamaddr_lo: 0,
             eval_done: false,
+            overflow_count: 0,
 
             dma_addr: None,
 
@@ -157,10 +159,6 @@ impl Ppu {
     pub fn clock(&mut self) {
         self.total_cycles += 1;
         let is_visible_cycle = matches!(self.cycle, VISIBLE_START..=VISIBLE_END);
-
-        // if self.total_cycles % (0xf000 * 60 * 5) == 0 {
-        //     println!("{:?}", self.oam_data);
-        // }
 
         match self.scanline {
             VISIBLE_SCANLINE_START..=VISIBLE_SCANLINE_END => {
@@ -288,6 +286,59 @@ impl Ppu {
         }
     }
 
+    pub fn load_oam(&self, pixels: &mut [u8]) {
+        for (i, oamdata) in self.oam_data.chunks(4).enumerate() {
+            if let [y, tile_index, attr, x] = oamdata {
+                let mut sprite = Sprite {
+                    x: *x,
+                    y: *y,
+                    attribute: *attr,
+                    ..Default::default()
+                };
+
+                let tile_index = *tile_index as u16;
+                let height = self.control.sprite_height();
+                let pattern_table = self.control.sprite_pattern_addr();
+                let flip_vertical = (attr & 0x80) == 0x80;
+
+                let tile_addr = if height == 8 {
+                    pattern_table | (tile_index << 4)
+                } else {
+                    let pattern_table = (tile_index & 0x1) & 0x1000;
+                    pattern_table | ((tile_index & 0xfe) << 4)
+                };
+                let tile_x = (i % 8) as u32 * 8;
+                let tile_y = (i / 8) as u32 * 8;
+
+                for y in 0..8 {
+                    let mut y_offset = if flip_vertical { height - 1 - y } else { y };
+
+                    if height == 16 && y_offset >= 8 {
+                        y_offset += 8;
+                    }
+
+                    sprite.pattern.low = self.bus.peek(tile_addr + y_offset);
+                    sprite.pattern.high = self.bus.peek(tile_addr + y_offset + 8);
+                    if sprite.attribute & 0x40 == 0x40 {
+                        sprite.horizontal_reverse();
+                    }
+
+                    let y = u32::from(y);
+
+                    for x in 0..8 {
+                        let (palette, color) = sprite.pixel_color();
+                        let color = self
+                            .bus
+                            .peek(PALETTE_START | ((palette << 2) | color) as u16);
+
+                        Self::set_pixel(color, tile_x + x, tile_y + y, 64, pixels);
+                        sprite.shift();
+                    }
+                }
+            }
+        }
+    }
+
     fn set_pixel(color: u8, x: u32, y: u32, screen_width: u32, pixels: &mut [u8]) {
         let color = 3 * color as usize;
         let idx = 3 * (x + y * screen_width) as usize;
@@ -323,6 +374,10 @@ impl Ppu {
             self.shift_sprites();
 
             match self.cycle {
+                // OAM_CLEAR_START..=8 if self.oam_idx >= 0x08 => {
+                //     // If OAMADDR is not less than eight when rendering starts, the eight bytes
+                //     // starting at OAMADDR & 0xF8 are copied to the first eight bytes of OAM
+                // }
                 OAM_CLEAR_START..=OAM_CLEAR_END if !self.is_prerender() => {
                     self.clear_secondary_oam();
                 }
@@ -366,12 +421,16 @@ impl Ppu {
             .then(|| self.bg.pixel_color(self.fine_x))
             .unwrap_or_default();
 
-        let sprite =
-            if let Some(sprite) = self.mask.show_sprite().then(|| self.get_sprite()).flatten() {
-                sprite
-            } else {
-                &Sprite::default()
-            };
+        let sprite = if let Some(sprite) = self
+            .mask
+            .show_sprite()
+            .then(|| self.get_visible_sprite())
+            .flatten()
+        {
+            sprite
+        } else {
+            &Sprite::default()
+        };
         let (spr_palette, spr_color) = sprite.pixel_color();
 
         // choose between the two, clipping decided here too
@@ -449,8 +508,8 @@ impl Ppu {
             self.sprite_zero_detected = false; // TODO: does this need locked in at end of eval period??
             self.secondary_oam_idx = 0;
             self.eval_done = false;
-            self.oamaddr_hi = (self.oam_idx >> 2) & 0x3f;
-            self.oamaddr_lo = self.oam_idx & 0b11;
+            self.oamaddr_hi = 0; // (self.oam_idx >> 2) & 0x3f; // both of these are causing trouble (at max sprites)
+            self.oamaddr_lo = 0; // self.oam_idx & 0b11;        // but this one is less troublesome
         } else if self.cycle == SPRITE_EVAL_END {
             self.sprite_count = (self.secondary_oam_idx >> 2) as u16;
         }
@@ -460,12 +519,12 @@ impl Ppu {
             self.oam_buffer = self.oam_data[self.oam_idx as usize];
         } else {
             // On even cycles, data is written to secondary OAM (unless secondary OAM is full, in which case it will read the value in secondary OAM instead)
-            let index = self.secondary_oam_idx & 0x1f;
+            let secondary_index = self.secondary_oam_idx & 0x1f;
 
             if self.eval_done {
-                // self.sprite_count = (self.sprite_count + 1) & 0x1f;
-                if self.secondary_oam_idx > SECONDARY_OAM_SIZE {
-                    self.oam_buffer = self.secondary_oam_data[index];
+                // self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;  // this is causing sprites to miss lines, in conjunction with reset logic above (worse on its own)
+                if self.secondary_oam_idx >= SECONDARY_OAM_SIZE {
+                    self.oam_buffer = self.secondary_oam_data[secondary_index];
                 }
             } else {
                 // if not previously detected, interpret this byte as y
@@ -475,7 +534,7 @@ impl Ppu {
                     !self.sprite_detected && (sprite_y..sprite_y + height).contains(&self.scanline);
 
                 if self.secondary_oam_idx < SECONDARY_OAM_SIZE {
-                    self.secondary_oam_data[index] = self.oam_buffer; // this is the even cycle write
+                    self.secondary_oam_data[self.secondary_oam_idx] = self.oam_buffer; // this is the even cycle write
 
                     // If Y-coordinate is in range, copy remaining bytes of sprite data (OAM[n][1] thru OAM[n][3]) into secondary OAM.
                     if self.sprite_detected {
@@ -494,8 +553,10 @@ impl Ppu {
                         self.eval_done |= self.oamaddr_hi == 0x00;
                     }
                 } else {
+                    // this whole block is doing nothing i think.
+
                     // secondary oam full, read instead
-                    self.oam_buffer = self.secondary_oam_data[index];
+                    self.oam_buffer = self.secondary_oam_data[secondary_index];
 
                     if self.sprite_detected {
                         self.status.set_sprite_overflow();
@@ -504,13 +565,24 @@ impl Ppu {
                         if self.oamaddr_lo == 0x04 {
                             self.oamaddr_lo = 0;
                             self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;
-                            self.eval_done = true; // tetanes has complicated logic, but i think it evaluates to this
+                            // self.eval_done = true;
+
+                            // match self.overflow_count.cmp(&0) {
+                            //     Ordering::Equal => self.overflow_count = 3,
+                            //     Ordering::Greater => {
+                            //         self.overflow_count -= 1;
+                            //         let no_overflow = self.overflow_count == 0;
+                            //         self.eval_done |= no_overflow;
+                            //         self.oamaddr_lo *= !no_overflow as u8;
+                            //     }
+                            //     Ordering::Less => (),
+                            // }
                         }
                     } else {
-                        // this is sprite overflow bug
-                        self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;
-                        self.oamaddr_lo = (self.oamaddr_lo + 1) & 0x03;
-                        self.eval_done |= self.oamaddr_hi == 0x00;
+                        // this is sprite overflow bug (broken, causes sprites to disappear)
+                        // self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;
+                        // self.oamaddr_lo = (self.oamaddr_lo + 1) & 0x03;
+                        // self.eval_done |= self.oamaddr_hi == 0x00;
                     }
                 }
             }
@@ -522,7 +594,7 @@ impl Ppu {
     // Load nametables into sprite output unit.  nametable deterined from bytes in secondary oam
     fn fetch_sprite(&mut self) {
         if self.cycle == SPRITE_FETCH_START {
-            self.secondary_oam_idx = 0;
+            self.secondary_oam_idx = 0; // TODO: can (should?) this be done at end of eval instead
         }
         let sprite_n = usize::from((self.cycle - SPRITE_FETCH_START) / 8);
         let sprite_index = sprite_n << 2;
@@ -621,8 +693,9 @@ impl Ppu {
         }
     }
 
-    fn get_sprite(&self) -> Option<&Sprite> {
-        let x = self.cycle - 1;
+    fn get_visible_sprite(&self) -> Option<&Sprite> {
+        let x = self.cycle;
+
         self.sprites
             .iter()
             .take(self.sprite_count as usize)

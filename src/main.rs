@@ -42,6 +42,7 @@ fn run_game_rom() {
         .unwrap();
 
     let mut canvas = window.into_canvas().present_vsync().build().unwrap();
+
     let mut event_pump = sdl_context.event_pump().unwrap();
     canvas.set_scale(3.0, 3.0).unwrap();
 
@@ -50,18 +51,38 @@ fn run_game_rom() {
         .create_texture_target(PixelFormatEnum::RGB24, 256, 240)
         .unwrap();
 
+    let dbg_window = video_subsystem
+        .window("debug", (64 * 3) as u32, (64 * 3) as u32)
+        .position_centered()
+        .build()
+        .unwrap();
+    let mut dbg_canvas = dbg_window.into_canvas().present_vsync().build().unwrap();
+    dbg_canvas.set_scale(3.0, 3.0).unwrap();
+    let dbg_creator = dbg_canvas.texture_creator();
+    let mut dbg_texture = dbg_creator
+        .create_texture_target(PixelFormatEnum::RGB24, 64, 64)
+        .unwrap();
+
     loop {
         nes.clock_frame();
-        let frame = nes.bus_mut().frame_buffer();
+        let bus = nes.bus_mut();
+        let frame = bus.frame_buffer();
 
-        // let mut frame = vec![0x0; ppu::TOTAL_PIXELS * 2 * 3]; // 2 pattern tables, 3 channels RGB
-        // nes.bus_mut().ppu.load_pattern_tables(&mut frame);
+        // let mut dbg_frame = vec![0x0; ppu::TOTAL_PIXELS * 2 * 3]; // 2 pattern tables, 3 channels RGB
+        // bus.ppu.load_pattern_tables(&mut dbg_frame);
 
-        // let mut frame = vec![0x0; ppu::TOTAL_PIXELS * 4 * 3]; // 4 nametables, 3 channels RGB
-        // nes.bus_mut().ppu.load_name_tables(&mut frame);
+        // let mut dbg_frame = vec![0x0; ppu::TOTAL_PIXELS * 4 * 3]; // 4 nametables, 3 channels RGB
+        // bus.ppu.load_name_tables(&mut dbg_frame);
 
-        // let mut frame = vec![0x0; TOTAL_PIXELS * 3];
-        // nes.bus_mut().ppu.load_palette(&mut frame);
+        // let mut dbg_frame = vec![0x0; TOTAL_PIXELS * 3];
+        // bus.ppu.load_palette(&mut dbg_frame);
+
+        let mut dbg_frame = vec![0x00; 64 * 8 * 8 * 3];
+        bus.ppu.load_oam(&mut dbg_frame);
+
+        dbg_texture.update(None, &dbg_frame, 64 * 3).unwrap();
+        dbg_canvas.copy(&dbg_texture, None, None).unwrap();
+        dbg_canvas.present();
 
         texture.update(None, frame, 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
