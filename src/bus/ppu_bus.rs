@@ -9,7 +9,7 @@ const PALETTE_SIZE: usize = 32;
 #[derive(Debug)]
 pub struct PpuBus {
     pub chr_rom: Memory,
-    vram: [u8; VRAM_SIZE],
+    vram: Memory, // [u8; VRAM_SIZE],
     mirroring: Mirroring,
     palette: [u8; PALETTE_SIZE],
 }
@@ -24,7 +24,7 @@ impl PpuBus {
     pub fn new(mirroring: Mirroring) -> Self {
         Self {
             chr_rom: Memory::new(),
-            vram: [0x00; VRAM_SIZE],
+            vram: Memory::with_size(VRAM_SIZE),
             mirroring,
             palette: [0; PALETTE_SIZE],
         }
@@ -66,7 +66,10 @@ impl MemAccess for PpuBus {
     fn write(&mut self, address: u16, value: u8) {
         match address {
             0x0000..0x2000 => {}
-            0x2000..0x3f00 => self.vram[self.get_vram_address(address)] = value,
+            0x2000..0x3f00 => {
+                let index = self.get_vram_address(address);
+                self.vram[index] = value
+            }
             0x3f00..0x4000 => self.palette[(address & 0x1f) as usize] = value,
             _ => self.write(address & 0x3fff, value),
         }
