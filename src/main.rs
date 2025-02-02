@@ -1,28 +1,12 @@
-mod apu;
-pub mod bus;
-mod cartridge;
-mod common;
-mod cpu;
-mod nes;
-mod ppu;
-mod util;
+use nes::common::mem::MemAccess;
+use nes::nes::Nes;
 
-use common::mem::MemAccess;
-use nes::Nes;
-
-use ppu::TOTAL_PIXELS;
+use nes::ppu::TOTAL_PIXELS;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 
 fn main() {
-    // let cartridge = cartridge::Cartridge::from_file("./game_roms/pacman.nes").unwrap();
-
-    // let cartridge =
-    //     cartridge::Cartridge::from_file("./src/test_roms/cpu/instr_timing/instr_timing.nes")
-    //         .unwrap();
-    // println!("{cartridge:?}");
-
     run_game_rom();
     // run_test_rom();
 }
