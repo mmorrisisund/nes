@@ -404,6 +404,7 @@ impl Ppu {
         // palette RAM ($3F00-$3FFF), the PPU will continuously draw the color at that address
         // instead of the EXT input, overriding the backdrop color.
 
+        // TODO: Does this first check also need to ensure rendering is enabled
         let color = if (address & PALETTE_START) == PALETTE_START {
             self.bus.read(address)
         } else if self.mask.rendering_enabled() {
@@ -509,7 +510,8 @@ impl Ppu {
             self.secondary_oam_idx = 0;
             self.eval_done = false;
             self.oamaddr_hi = 0; // (self.oam_idx >> 2) & 0x3f; // both of these are causing trouble (at max sprites)
-            self.oamaddr_lo = 0; // self.oam_idx & 0b11;        // but this one is less troublesome
+            self.oamaddr_lo = 0; // self.oam_idx & 0b11; // but this one is less troublesome
+            self.oam_idx = 0; // (self.oamaddr_hi << 2) | self.oamaddr_lo;
         } else if self.cycle == SPRITE_EVAL_END {
             self.sprite_count = (self.secondary_oam_idx >> 2) as u16;
         }
@@ -565,7 +567,7 @@ impl Ppu {
                         if self.oamaddr_lo == 0x04 {
                             self.oamaddr_lo = 0;
                             self.oamaddr_hi = (self.oamaddr_hi + 1) & 0x3f;
-                            // self.eval_done = true;
+                            self.eval_done = self.oamaddr_hi == 0x0;
 
                             // match self.overflow_count.cmp(&0) {
                             //     Ordering::Equal => self.overflow_count = 3,
