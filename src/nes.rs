@@ -6,6 +6,7 @@ use crate::{
     bus::MainBus,
     cartridge::{Cartridge, CartridgeError},
     common::mem::Reset,
+    controller::Joypad,
     cpu::{Cpu, RunState},
 };
 
@@ -34,7 +35,7 @@ impl Nes {
     }
 
     pub fn clock_frame(&mut self) {
-        for _ in 0..29780 {
+        for _ in 0..20480 {
             self.clock_cycle();
         }
     }
@@ -45,5 +46,9 @@ impl Nes {
 
     pub fn bus_mut(&mut self) -> &mut MainBus {
         self.cpu.bus_mut()
+    }
+
+    pub fn joypad_mut(&mut self) -> &mut Joypad {
+        &mut self.cpu.bus_mut().joypad1
     }
 }

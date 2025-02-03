@@ -129,3 +129,7 @@ OAM
     -- Cleared at start of each visible scanline
   -- Secondary OAM fills sprite output unit (Fetch phase)
     -- Sprite output units used for pixel selection against background pixel
+
+Keybindings
+P => toggle pause
+F => clock next frame

@@ -5,6 +5,7 @@ use crate::{
         interconnect::{DmaSource, Interrupt, InterruptSignaler, SignalProvider},
         mem::{MemAccess, Reset},
     },
+    controller::Joypad,
     ppu::Ppu,
 };
 
@@ -13,6 +14,7 @@ pub struct MainBus {
     apu: Apu,
     pub ppu: Ppu,
     cartridge: Cartridge,
+    pub joypad1: Joypad,
 }
 
 impl MainBus {
@@ -22,6 +24,7 @@ impl MainBus {
             apu: Apu::new(),
             ppu: Ppu::default(),
             cartridge: Cartridge::empty(),
+            joypad1: Joypad::new(),
         }
     }
 
@@ -85,7 +88,7 @@ impl MemAccess for MainBus {
             0x4000..0x4014 | 0x4017 => 0,
             0x4015 => self.apu.peek_status(),
             0x4014 => 0,                              // ppu
-            0x4016 => 0,                              // controller
+            0x4016 => self.joypad1.peek(),            // controller
             0x4018..0x4020 => 0,                      // unused (test mode)
             0x4020.. => self.cartridge.peek(address), // cartridge
         }
@@ -102,7 +105,7 @@ impl MemAccess for MainBus {
             0x4000..0x4014 | 0x4017 => 0,
             0x4015 => self.apu.read_status(),
             0x4014 => 0,                              // ppu
-            0x4016 => 0,                              // controller
+            0x4016 => self.joypad1.read(),            // controller
             0x4018..0x4020 => 0,                      // unused (test mode)
             0x4020.. => self.cartridge.read(address), // cartridge
         }
@@ -143,7 +146,7 @@ impl MemAccess for MainBus {
             0x4015 => self.apu.write_status(value),
             0x4017 => self.apu.write_frame_counter(value),
             0x4014 => self.ppu.write_dma_addr(value), // ppu
-            0x4016 => {}                              // controller
+            0x4016 => self.joypad1.write(value),      // controller
             0x4018..0x4020 => {}                      // unused (test mode)
             0x4020.. => self.cartridge.write(address, value), // cartridge
         }
