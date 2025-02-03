@@ -1,4 +1,7 @@
-use std::path::Path;
+use std::{
+    io::{Read, Write},
+    path::Path,
+};
 
 use dynwave::AudioPlayer;
 
@@ -27,6 +30,22 @@ impl Nes {
             cpu,
             audio_player: AudioPlayer::new(44100, dynwave::BufferSize::Samples(1000000)).unwrap(),
         })
+    }
+
+    pub fn save_state(&self) {
+        let cpu_state = bincode::serialize(&self.cpu).unwrap();
+
+        let mut writer = std::fs::File::create("dump.bin").unwrap();
+        writer.write_all(&cpu_state).unwrap();
+    }
+
+    pub fn load_state(&mut self) {
+        let mut bytes = Vec::new();
+        let mut reader = std::fs::File::open("dump.bin").unwrap();
+        reader.read_to_end(&mut bytes).unwrap();
+        let cpu = bincode::deserialize(&bytes).unwrap();
+
+        self.cpu = cpu;
     }
 
     pub fn reset(&mut self) {
