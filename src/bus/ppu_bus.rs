@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     cartridge::Mirroring,
     common::mem::{MemAccess, Memory},
@@ -6,7 +8,7 @@ use crate::{
 const VRAM_SIZE: usize = 2048;
 const PALETTE_SIZE: usize = 32;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PpuBus {
     pub chr_rom: Memory,
     vram: Memory, // [u8; VRAM_SIZE],

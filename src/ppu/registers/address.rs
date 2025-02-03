@@ -1,4 +1,6 @@
-#[derive(Debug, Default, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct AddressRegister(u16);
 
 // The 15 bit registers t and v are composed this way during rendering:

@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
 
+use serde::{Deserialize, Serialize};
+
 use crate::common::interconnect::InterruptSignaler;
 
-#[derive(Debug, Default, PartialEq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Clone, Copy, Serialize, Deserialize)]
 enum SequencerMode {
     #[default]
     FourStep,
@@ -24,7 +26,7 @@ pub enum FrameType {
     Half,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FrameCounter {
     count: u16,
     count_reset_delay: i8,

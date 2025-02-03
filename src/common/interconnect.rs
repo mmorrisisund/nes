@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub trait InterruptSignaler {
     fn interrupt_status(&self) -> bool;
     fn dma_status(&self) -> Option<u16>;
@@ -8,13 +10,13 @@ pub trait SignalProvider {
     fn dma_requested(&mut self) -> Option<DmaSource>;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum DmaSource {
     Apu(u16),
     Ppu(u16),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Interrupt {
     Irq,
     Nmi,

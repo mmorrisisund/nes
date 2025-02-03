@@ -1,12 +1,14 @@
+use serde::{Deserialize, Serialize};
+
 // TODO: this is shared with bg tile, remove duplication
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct BitPlane {
     // pub address: u16,
     pub low: u8,
     pub high: u8,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Sprite {
     pub pattern: BitPlane,
     pub attribute: u8,

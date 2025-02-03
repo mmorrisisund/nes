@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::util::BitFlag;
 
 pub struct Status;
@@ -25,7 +27,7 @@ impl Status {
     const VBLANK_STARTED: u8  = 7;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct StatusRegister(u8);
 
 impl StatusRegister {

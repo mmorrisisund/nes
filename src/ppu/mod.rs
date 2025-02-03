@@ -5,6 +5,13 @@ mod tile;
 
 use std::{cell::Cell, cmp::Ordering};
 
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
+use crate::{
+    bus::PpuBus,
+    common::{interconnect::InterruptSignaler, mem::MemAccess},
+};
 use frame::Frame;
 use registers::{
     address::{self, AddressRegister},
@@ -14,11 +21,6 @@ use registers::{
 };
 use sprite::Sprite;
 use tile::Tile;
-
-use crate::{
-    bus::PpuBus,
-    common::{interconnect::InterruptSignaler, mem::MemAccess},
-};
 
 pub const WIDTH: u32 = 256;
 pub const HEIGHT: u32 = 240;
@@ -54,7 +56,7 @@ const VISIBLE_SCANLINE_END: u16 = 239;
 const VBLANK_START_LINE: u16 = 241;
 const PRERENDER_LINE: u16 = 261;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Ppu {
     pub bus: PpuBus,
     control: ControlRegister,
@@ -65,6 +67,7 @@ pub struct Ppu {
     first_write: bool,       // internal w register
     fine_x: u8,              // internal x register
     oam_idx: u8,
+    #[serde(with = "BigArray")]
     oam_data: [u8; 256],
     oam_buffer: u8,
     vram_buffer: u8,

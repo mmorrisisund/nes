@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-#[derive(Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Instruction {
     pub byte_value: u8,
     pub operand: u16,
@@ -59,7 +61,7 @@ impl Display for Instruction {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpCode {
     Adc, // Add with carry
     And, // And
@@ -251,7 +253,7 @@ impl Display for OpCode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AddressingMode {
     Implied,
     Relative,

@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use super::{
     ApuChannel, EnvelopeGenerator, FrameTrigger, LengthCounter, Sequencer, Timer, TimerTrait,
 };
@@ -15,7 +17,7 @@ pub enum PulseChannel {
     Two,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Pulse {
     period: usize,
     length_counter: LengthCounter,
@@ -111,7 +113,7 @@ impl TimerTrait for Pulse {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct Sweeper {
     count: usize,
     enabled: bool,

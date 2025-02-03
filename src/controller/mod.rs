@@ -1,6 +1,7 @@
 use enumflags2::{bitflags, BitFlag, BitFlags};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Joypad {
     state: BitFlags<JoypadButton>,
     index: u8,
@@ -48,7 +49,7 @@ impl Joypad {
 
 #[bitflags]
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum JoypadButton {
     A,
     B,

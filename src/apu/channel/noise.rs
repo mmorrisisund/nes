@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use super::{ApuChannel, EnvelopeGenerator, FrameTrigger, LengthCounter, Timer, TimerTrait};
 
 const PERIOD_LENGTH: [usize; 16] = [
     4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
 ];
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Noise {
     timer: Timer,
     shift: ShiftRegister,
@@ -84,7 +86,7 @@ enum ShiftMode {
     One,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ShiftRegister {
     value: u16,
     mode_shift: usize,

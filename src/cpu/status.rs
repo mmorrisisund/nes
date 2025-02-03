@@ -1,5 +1,7 @@
 use std::fmt::UpperHex;
 
+use serde::{Deserialize, Serialize};
+
 use crate::util::BitFlag;
 
 #[derive(Default)]
@@ -18,7 +20,7 @@ impl Status {
     pub const NEGATIVE: u8    = 7;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct StatusRegister(u8);
 
 impl From<u8> for StatusRegister {

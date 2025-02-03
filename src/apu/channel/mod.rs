@@ -3,6 +3,8 @@ pub mod noise;
 pub mod pulse;
 pub mod triangle;
 
+use serde::{Deserialize, Serialize};
+
 pub trait ApuChannel {
     fn enabled(&self) -> bool;
     fn set_enabled(&mut self, enabled: bool);
@@ -28,7 +30,7 @@ pub enum Channel {
     Dmc,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Timer {
     count: usize,
     divider: usize,
@@ -68,7 +70,7 @@ const LENGTH_TABLE: [u8; 0x20] = [
     192, 24, 72, 26, 16, 28, 32, 30,
 ];
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LengthCounter {
     counter: u8,
     enabled: bool,
@@ -118,7 +120,7 @@ impl LengthCounter {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Sequencer {
     sequence: Vec<u8>,
     position: usize,
@@ -154,7 +156,7 @@ impl Sequencer {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EnvelopeGenerator {
     restart: bool,
     loop_flag: bool,

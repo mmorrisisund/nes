@@ -1,6 +1,8 @@
 pub mod instruction;
 mod status;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     bus::MainBus,
     common::{
@@ -31,6 +33,7 @@ fn on_same_page(addr1: u16, addr2: u16) -> bool {
     (addr1 & 0xff00) == (addr2 & 0xff00)
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Cpu {
     reg_pc: u16,
     reg_sp: u8,

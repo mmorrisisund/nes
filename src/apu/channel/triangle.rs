@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use super::{ApuChannel, FrameTrigger, LengthCounter, Sequencer, Timer, TimerTrait};
 
 #[rustfmt::skip]
@@ -6,7 +8,7 @@ const SEQUENCE: [u8; 32] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 ];
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Triangle {
     timer: Timer,
     linear_counter: LinearCounter,
@@ -87,7 +89,7 @@ impl TimerTrait for Triangle {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LinearCounter {
     counter: u8,
     period: u8,

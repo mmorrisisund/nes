@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use super::TOTAL_PIXELS;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Frame {
     pub buffer: Vec<u8>,
 }

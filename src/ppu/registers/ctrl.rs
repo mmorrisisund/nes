@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::util::BitFlag;
 
 const NAMETABLE1: u16 = 0x2000;
@@ -34,7 +36,7 @@ impl Control {
     pub const NMI_ENABLE: u8          = 7;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ControlRegister(u8);
 
 impl ControlRegister {

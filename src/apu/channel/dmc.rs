@@ -1,12 +1,13 @@
-use crate::common::interconnect::InterruptSignaler;
+use serde::{Deserialize, Serialize};
 
 use super::{ApuChannel, Timer, TimerTrait};
+use crate::common::interconnect::InterruptSignaler;
 
 const PERIOD_LENGTH: [usize; 16] = [
     428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
 ];
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Dmc {
     timer: Timer,
     sample_buffer: u8,

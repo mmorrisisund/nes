@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// Palettes
 ///
 /// 4 available palettes, 4 colors per palette
@@ -11,14 +13,14 @@
 /// +----- Background/Sprite select
 ///
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct BitPlane {
     pub id: u16,
     pub low: u16,
     pub high: u16,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Tile {
     pub next_pattern: BitPlane,
     pub next_palette: u8,

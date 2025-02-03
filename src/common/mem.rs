@@ -3,6 +3,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use serde::{Deserialize, Serialize};
+
 pub trait MemAccess {
     fn read(&mut self, address: u16) -> u8;
 
@@ -29,7 +31,7 @@ pub trait Reset {
     fn reset(&mut self);
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Memory(Vec<u8>);
 
 impl Memory {

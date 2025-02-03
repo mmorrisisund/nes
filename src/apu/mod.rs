@@ -1,8 +1,9 @@
 mod channel;
 mod frame_counter;
 
-pub use channel::Channel;
+use serde::{Deserialize, Serialize};
 
+pub use channel::Channel;
 use channel::{
     dmc::Dmc,
     noise::Noise,
@@ -32,7 +33,7 @@ pub trait ApuRegisters {
     fn write_frame_counter(&mut self, value: u8);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Apu {
     pulse1: Pulse,
     pulse2: Pulse,

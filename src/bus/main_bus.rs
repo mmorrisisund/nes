@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
 use crate::{
     apu::{Apu, ApuRegisters, Channel},
     cartridge::Cartridge,
@@ -9,7 +12,9 @@ use crate::{
     ppu::Ppu,
 };
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MainBus {
+    #[serde(with = "BigArray")]
     ram: [u8; 0x800],
     apu: Apu,
     pub ppu: Ppu,

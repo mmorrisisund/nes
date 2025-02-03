@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::util::BitFlag;
 
 pub enum Color {
@@ -32,7 +34,7 @@ impl Mask {
     pub const EMPHASIZE_BLUE: u8   = 7;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MaskRegister(u8);
 
 impl MaskRegister {

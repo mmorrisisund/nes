@@ -5,10 +5,12 @@ use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use crate::common::mem::{MemAccess, Memory, Reset};
 pub use error::CartridgeError;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Mirroring {
     Vertical,
     Horizontal,
@@ -16,7 +18,7 @@ pub enum Mirroring {
 }
 
 #[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct INesHeader {
     prg_rom_size: u8,
     chr_rom_size: u8,
@@ -121,7 +123,7 @@ impl INesHeader {
     }
 }
 
-#[allow(dead_code)] // TODO: Remove once ppu/mappers implemented
+#[derive(Serialize, Deserialize)]
 pub struct Cartridge {
     header: INesHeader,
     prg_rom: Vec<u8>,

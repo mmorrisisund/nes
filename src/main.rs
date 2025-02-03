@@ -99,12 +99,10 @@ fn run_game_rom() {
                 } => std::process::exit(0),
 
                 Event::KeyDown { keycode, .. } => match keycode.unwrap() {
-                    Keycode::P => {
-                        paused = !paused;
-                    }
-                    Keycode::F => {
-                        nes.clock_frame();
-                    }
+                    Keycode::D => nes.save_state(),
+                    Keycode::F => nes.clock_frame(),
+                    Keycode::L => nes.load_state(),
+                    Keycode::P => paused = !paused,
                     _ => {
                         if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
                             nes.bus_mut().joypad1.set_button(*key, true);
