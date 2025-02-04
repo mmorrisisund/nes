@@ -435,6 +435,7 @@ impl Ppu {
         } else {
             &Sprite::default()
         };
+
         let (spr_palette, spr_color) = sprite.pixel_color();
 
         // choose between the two, clipping decided here too
@@ -618,6 +619,7 @@ impl Ppu {
                 // unused
                 self.bg_addr_buffer = self.v_addr.attribute_addr();
 
+                self.sprite.y = self.secondary_oam_data[sprite_index];
                 self.sprite.attribute = self.secondary_oam_data[sprite_index + 2];
             }
             3 => {

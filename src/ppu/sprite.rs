@@ -47,7 +47,7 @@ impl Sprite {
     }
 
     pub fn has_priority(&self) -> bool {
-        self.attribute & 0x20 == 0x20
+        self.attribute & 0x20 == 0x0
     }
 
     pub fn horizontal_reverse(&mut self) {
