@@ -13,19 +13,14 @@ pub struct Sprite {
     pub pattern: BitPlane,
     pub attribute: u8,
     pub x: u8,
-    pub offset: u8,
-
     pub y: u8,
+    pub is_sprite_zero: bool,
 }
 
 impl Sprite {
     pub fn shift(&mut self) {
-        // if self.offset == 0 {
         self.pattern.low <<= 1;
         self.pattern.high <<= 1;
-        // } else {
-        //     self.offset -= 1;
-        // }
     }
 
     pub fn contains(&self, other_x: u8) -> bool {

@@ -43,6 +43,10 @@ impl StatusRegister {
         self.0.set_flag(Status::SPRITE_ZERO_HIT);
     }
 
+    pub fn sprite_zero_hit(&self) -> bool {
+        self.0.contains(Status::SPRITE_ZERO_HIT)
+    }
+
     pub fn set_vblank_started(&mut self) {
         self.0.set_flag(Status::VBLANK_STARTED);
     }

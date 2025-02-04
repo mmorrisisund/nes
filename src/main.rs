@@ -63,9 +63,11 @@ fn run_game_rom() {
     //     .unwrap();
 
     let mut paused = false;
+    let mut frame_count = 0;
     loop {
         if !paused {
             nes.clock_frame();
+            frame_count += 1;
         }
         // let bus = nes.bus_mut();
         let frame = nes.bus_mut().frame_buffer();

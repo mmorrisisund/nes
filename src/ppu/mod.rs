@@ -85,6 +85,8 @@ pub struct Ppu {
     eval_done: bool,
     overflow_count: u8,
 
+    sprite_zero_visible: bool,
+
     dma_addr: Option<u16>,
 
     bg: Tile,
@@ -136,6 +138,8 @@ impl Ppu {
             oamaddr_lo: 0,
             eval_done: false,
             overflow_count: 0,
+
+            sprite_zero_visible: false,
 
             dma_addr: None,
 
@@ -411,40 +415,52 @@ impl Ppu {
         let color = if (address & PALETTE_START) == PALETTE_START {
             self.bus.read(address)
         } else if self.mask.rendering_enabled() {
-            self.bus.read(self.color_address())
+            let color = self.color_address();
+            self.bus.read(color)
         } else {
+            // TODO: render_pixel only runs when rendering is enabled, so this will never be hit
             self.bus.read(PALETTE_START)
         };
         self.frame.set_pixel(x, y, color);
     }
 
-    fn color_address(&self) -> u16 {
-        let (bg_palette, bg_color) = self
-            .mask
-            .show_background()
-            .then(|| self.bg.pixel_color(self.fine_x))
-            .unwrap_or_default();
+    fn color_address(&mut self) -> u16 {
+        let show_bg = self.mask.show_background();
+        let clip_bg = self.cycle < 8 && !self.mask.show_left_bg();
 
-        let sprite = if let Some(sprite) = self
-            .mask
-            .show_sprite()
-            .then(|| self.get_sprite_pixel())
-            .flatten()
-        {
-            sprite
+        let (bg_palette, bg_color) = if show_bg && !clip_bg {
+            self.bg.pixel_color(self.fine_x)
+        } else {
+            (0, 0)
+        };
+
+        let show_sprite = self.mask.show_sprite();
+        let clip_sprite = self.cycle < 8 && !self.mask.show_left_sprite();
+
+        let sprite = if show_sprite && !clip_sprite {
+            if let Some(sprite) = self
+                .sprites
+                .iter()
+                .take(self.sprite_count as usize)
+                .find(|sprite| sprite.contains(self.cycle as u8) && sprite.pixel_color().1 != 0)
+            {
+                sprite
+            } else {
+                &Sprite::default()
+            }
         } else {
             &Sprite::default()
         };
-
         let (spr_palette, spr_color) = sprite.pixel_color();
 
-        // choose between the two, clipping decided here too
         let (palette, color) = match (bg_color, spr_color) {
             (0, 0) => (0, 0),
             (0, _) => (spr_palette, spr_color),
             (_, 0) => (bg_palette, bg_color),
             _ => {
-                // FIXME: if sprite 0 applies, set status register
+                if sprite.is_sprite_zero && !self.status.sprite_zero_hit() && self.cycle != 255 {
+                    self.status.set_sprite_zero_hit();
+                }
 
                 if sprite.has_priority() {
                     (spr_palette, spr_color)
@@ -454,7 +470,6 @@ impl Ppu {
             }
         };
 
-        // return addr
         PALETTE_START | ((palette << 2) | color) as u16
     }
 
@@ -517,6 +532,7 @@ impl Ppu {
             self.oamaddr_lo = 0; // self.oam_idx & 0b11; // but this one is less troublesome
             self.oam_idx = 0; // (self.oamaddr_hi << 2) | self.oamaddr_lo;
         } else if self.cycle == SPRITE_EVAL_END {
+            self.sprite_zero_visible = self.sprite_zero_detected;
             self.sprite_count = (self.secondary_oam_idx >> 2) as u16;
         }
 
@@ -627,7 +643,6 @@ impl Ppu {
                 self.bg.next_palette = self.bus.read(self.bg_addr_buffer);
 
                 self.sprite.x = self.secondary_oam_data[sprite_index + 3];
-                self.sprite.offset = self.sprite.x;
             }
             4 => self.spr_addr_buffer = self.get_sprite_pattern_address(),
             5 => self.sprite.pattern.low = self.bus.read(self.spr_addr_buffer),
@@ -638,6 +653,7 @@ impl Ppu {
                 if self.sprite.attribute & 0x40 == 0x40 {
                     self.sprite.horizontal_reverse();
                 }
+                self.sprite.is_sprite_zero = self.sprite_zero_visible && sprite_n == 0;
 
                 self.sprites[sprite_n] = self.sprite;
 
@@ -698,15 +714,6 @@ impl Ppu {
             }
             pattern_table | ((tile_idx & 0xfe) << 4) | y_offset
         }
-    }
-
-    fn get_sprite_pixel(&self) -> Option<&Sprite> {
-        let x = self.cycle;
-
-        self.sprites
-            .iter()
-            .take(self.sprite_count as usize)
-            .find(|sprite| sprite.contains(x as u8) && sprite.pixel_color().1 != 0)
     }
 
     fn start_vblank(&mut self) {
