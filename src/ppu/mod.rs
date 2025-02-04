@@ -428,7 +428,7 @@ impl Ppu {
         let sprite = if let Some(sprite) = self
             .mask
             .show_sprite()
-            .then(|| self.get_visible_sprite())
+            .then(|| self.get_sprite_pixel())
             .flatten()
         {
             sprite
@@ -700,13 +700,13 @@ impl Ppu {
         }
     }
 
-    fn get_visible_sprite(&self) -> Option<&Sprite> {
+    fn get_sprite_pixel(&self) -> Option<&Sprite> {
         let x = self.cycle;
 
         self.sprites
             .iter()
             .take(self.sprite_count as usize)
-            .find(|sprite| sprite.contains(x as u8))
+            .find(|sprite| sprite.contains(x as u8) && sprite.pixel_color().1 != 0)
     }
 
     fn start_vblank(&mut self) {
