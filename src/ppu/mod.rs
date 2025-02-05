@@ -3,7 +3,7 @@ mod registers;
 mod sprite;
 mod tile;
 
-use std::{cell::Cell, cmp::Ordering};
+use std::cell::Cell;
 
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;

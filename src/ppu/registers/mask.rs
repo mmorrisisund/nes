@@ -24,7 +24,7 @@ pub struct Mask;
 #[rustfmt::skip]
 impl Mask {
     // bit location, not value
-    pub const GREYSCALE: u8        = 0;
+    pub const GRAYSCALE: u8        = 0;
     pub const SHOW_LEFT_BG: u8     = 1;
     pub const SHOW_LEFT_SPRITE: u8 = 2;
     pub const SHOW_BG: u8          = 3;
@@ -42,8 +42,8 @@ impl MaskRegister {
         self.0 = value;
     }
 
-    pub fn is_greyscale(&self) -> bool {
-        self.0.contains(Mask::GREYSCALE)
+    pub fn is_grayscale(&self) -> bool {
+        self.0.contains(Mask::GRAYSCALE)
     }
 
     pub fn show_left_bg(&self) -> bool {

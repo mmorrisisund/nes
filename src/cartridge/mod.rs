@@ -285,9 +285,7 @@ mod tests {
 
     #[test]
     fn file_not_found() {
-        let err = Cartridge::from_file("../fake_dir/not_real.nes")
-            .err()
-            .expect("should be an error");
+        let err = Cartridge::from_file("../fake_dir/not_real.nes").expect_err("should be an error");
 
         if let CartridgeError::IOError(file_err) = err {
             assert_eq!(file_err.kind(), ErrorKind::NotFound);
@@ -298,9 +296,7 @@ mod tests {
 
     #[test]
     fn invalid_extension() {
-        let err = Cartridge::from_file("../fake_dir/game.notnes")
-            .err()
-            .expect("should be an error");
+        let err = Cartridge::from_file("../fake_dir/game.notnes").expect_err("should be an error");
 
         if let CartridgeError::UnsupportedFile = err {
             // success
@@ -313,8 +309,7 @@ mod tests {
     fn invalid_header() {
         // let f = include_bytes!("../test roms/cartridge_tests/wrong_header.nes");
         let err = Cartridge::from_file("./src/test_roms/cartridge/wrong_header.nes")
-            .err()
-            .expect("should be an error");
+            .expect_err("should be an error");
 
         if let CartridgeError::InvalidHeader = err {
             // success
@@ -326,8 +321,7 @@ mod tests {
     #[test]
     fn large_file() {
         let err = Cartridge::from_file("./src/test_roms/cartridge/large_file.nes")
-            .err()
-            .expect("should be an error");
+            .expect_err("should be an error");
 
         if let CartridgeError::FileTooLarge(_) = err {
             // success
