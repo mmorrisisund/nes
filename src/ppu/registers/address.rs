@@ -135,7 +135,7 @@ impl AddressRegister {
     }
 
     pub fn set_nametable_select(&mut self, value: u8) {
-        self.0 = (self.0 & !NT_SELECT_MASK) | (u16::from(value) << 10);
+        self.0 = (self.0 & !NT_SELECT_MASK) | ((u16::from(value) & 0x03) << 10);
     }
 
     pub fn get_fine_y(&self) -> u8 {

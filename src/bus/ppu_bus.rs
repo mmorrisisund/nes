@@ -47,7 +47,7 @@ impl PpuBus {
         //     _ => vram_index,
         // };
         // (mirrored_address & 0x7ff) as usize
-        ((vram_index & 0x3ff) & 0x7ff) as usize
+        ((vram_index) & 0x7ff) as usize
     }
 }
 

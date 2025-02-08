@@ -42,8 +42,12 @@ impl MaskRegister {
         self.0 = value;
     }
 
-    pub fn is_grayscale(&self) -> bool {
-        self.0.contains(Mask::GRAYSCALE)
+    pub fn grayscale(&self) -> u8 {
+        if self.0.contains(Mask::GRAYSCALE) {
+            0x30
+        } else {
+            0x3f
+        }
     }
 
     pub fn show_left_bg(&self) -> bool {
@@ -62,18 +66,18 @@ impl MaskRegister {
         self.0.contains(Mask::SHOW_SPRITE)
     }
 
-    pub fn emphasize(&self) -> Vec<Color> {
-        let mut colors = Vec::new();
+    pub fn emphasis(&self) -> u8 {
+        let mut emphasis = 0;
         if self.0.contains(Mask::EMPHASIZE_RED) {
-            colors.push(Color::Red);
+            emphasis.set_flag(Mask::EMPHASIZE_RED);
         }
         if self.0.contains(Mask::EMPHASIZE_BLUE) {
-            colors.push(Color::Blue);
+            emphasis.set_flag(Mask::EMPHASIZE_BLUE);
         }
         if self.0.contains(Mask::EMPHASIZE_GREEN) {
-            colors.push(Color::Green);
+            emphasis.set_flag(Mask::EMPHASIZE_GREEN);
         }
-        colors
+        emphasis
     }
 
     pub fn rendering_enabled(&self) -> bool {

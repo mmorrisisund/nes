@@ -242,7 +242,8 @@ impl Ppu {
                         let x = u32::from(tile_x + (7 - x));
                         let y = u32::from(tile_y + y);
                         Self::set_pixel(
-                            color, // & self.mask.grayscale) | self.mask.emphasis,
+                            (color & self.mask.grayscale()) as u16
+                                | ((self.mask.emphasis() as u16) << 1),
                             x + x_offset,
                             y + y_offset,
                             WIDTH,
@@ -271,7 +272,7 @@ impl Ppu {
                         let color = self.bus.peek(PALETTE_START | palette);
                         let x = u32::from(tile_x + (7 - x));
                         let y = u32::from(tile_y + y);
-                        Self::set_pixel(color, x_offset + x, y, WIDTH, pixels);
+                        Self::set_pixel(color as u16, x_offset + x, y, WIDTH, pixels);
                     }
                 }
             }
@@ -280,14 +281,18 @@ impl Ppu {
 
     pub fn load_palette(&self, pixels: &mut [u8]) {
         for addr in PALETTE_START..PALETTE_END {
-            let offset = addr - PALETTE_START;
-            let x = u32::from(offset % 8) * 32;
-            let y = u32::from(offset / 8) * 32;
+            let index = addr - PALETTE_START;
+            let x = u32::from(index % 4) * 32;
+            let y = u32::from(index / 4) * 32;
             let color = self.bus.peek(addr);
+            // note for later: at 3f00 color is return 0x0f instead of 0x16
+            let sprite_table = (addr as u32 & 0x10) * 8;
+            let x = x + sprite_table;
+            let y = y - sprite_table;
 
             for x in x..x + 32 {
                 for y in y..y + 32 {
-                    Self::set_pixel(color, x, y, WIDTH, pixels);
+                    Self::set_pixel(color as u16, x, y, WIDTH, pixels);
                 }
             }
         }
@@ -338,7 +343,7 @@ impl Ppu {
                             .bus
                             .peek(PALETTE_START | ((palette << 2) | color) as u16);
 
-                        Self::set_pixel(color, tile_x + x, tile_y + y, 64, pixels);
+                        Self::set_pixel(color as u16, tile_x + x, tile_y + y, 64, pixels);
                         sprite.shift();
                     }
                 }
@@ -346,7 +351,7 @@ impl Ppu {
         }
     }
 
-    fn set_pixel(color: u8, x: u32, y: u32, screen_width: u32, pixels: &mut [u8]) {
+    fn set_pixel(color: u16, x: u32, y: u32, screen_width: u32, pixels: &mut [u8]) {
         let color = 3 * color as usize;
         let idx = 3 * (x + y * screen_width) as usize;
 
@@ -887,7 +892,7 @@ impl InterruptSignaler for Ppu {
 }
 
 #[rustfmt::skip]
-pub static SYSTEM_PALETTE: &[u8; 0x600] = include_bytes!("Composite_wiki.pal");
+pub static SYSTEM_PALETTE: &[u8; 0x600] = include_bytes!("ntscpalette.pal");
 
 #[cfg(test)]
 mod tests {
