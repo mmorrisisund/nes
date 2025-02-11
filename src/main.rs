@@ -2,127 +2,114 @@ use std::collections::HashMap;
 
 use nes::common::mem::MemAccess;
 use nes::controller::JoypadButton;
+use nes::gui::Gui;
 use nes::nes::Nes;
 
-use nes::ppu::TOTAL_PIXELS;
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
+use dynwave::AudioPlayer;
+use eframe::egui::{self, CentralPanel, ColorImage, TopBottomPanel, ViewportBuilder, ViewportId};
+use eframe::CreationContext;
+use egui::Key;
 
 fn main() {
     run_game_rom();
     // run_test_rom();
 }
 
-#[allow(dead_code)]
-fn run_game_rom() {
-    let mut nes = Nes::new("./game_roms/smb1.nes").unwrap();
-
-    nes.reset();
-
+fn get_key_map() -> HashMap<Key, JoypadButton> {
     let mut key_map = HashMap::new();
-    key_map.insert(Keycode::A, JoypadButton::A);
-    key_map.insert(Keycode::B, JoypadButton::B);
-    key_map.insert(Keycode::Space, JoypadButton::Select);
-    key_map.insert(Keycode::Return, JoypadButton::Start);
-    key_map.insert(Keycode::Up, JoypadButton::Up);
-    key_map.insert(Keycode::Down, JoypadButton::Down);
-    key_map.insert(Keycode::Left, JoypadButton::Left);
-    key_map.insert(Keycode::Right, JoypadButton::Right);
+    key_map.insert(Key::A, JoypadButton::A);
+    key_map.insert(Key::B, JoypadButton::B);
+    key_map.insert(Key::Space, JoypadButton::Select);
+    key_map.insert(Key::Enter, JoypadButton::Start);
+    key_map.insert(Key::ArrowUp, JoypadButton::Up);
+    key_map.insert(Key::ArrowDown, JoypadButton::Down);
+    key_map.insert(Key::ArrowLeft, JoypadButton::Left);
+    key_map.insert(Key::ArrowRight, JoypadButton::Right);
 
-    let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-    let window = video_subsystem
-        .window("NES", (256 * 3) as u32, (240 * 3) as u32)
-        .position_centered()
-        .build()
-        .unwrap();
+    key_map
+}
 
-    let mut canvas = window.into_canvas().present_vsync().build().unwrap();
+struct App {
+    gui: Gui,
+    nes: Nes,
+    image_texture: egui::TextureHandle,
+    audio_player: AudioPlayer<f32>,
+    key_map: HashMap<Key, JoypadButton>,
 
-    let mut event_pump = sdl_context.event_pump().unwrap();
-    canvas.set_scale(3.0, 3.0).unwrap();
+    show_tools: bool,
+    current_tab: u8,
+}
 
-    let creator = canvas.texture_creator();
-    let mut texture = creator
-        .create_texture_target(PixelFormatEnum::RGB24, 256, 240)
-        .unwrap();
+impl App {
+    fn new(cc: &CreationContext) -> Self {
+        let mut nes = Nes::new("./game_roms/smb1.nes").unwrap();
+        nes.reset();
 
-    let dbg_window = video_subsystem
-        // .window("debug", (256 * 3) as u32, (240 * 3) as u32)
-        .window("debug", (256 * 3) as u32, (256 * 3) as u32)
-        .position_centered()
-        .build()
-        .unwrap();
-    let mut dbg_canvas = dbg_window.into_canvas().present_vsync().build().unwrap();
-    dbg_canvas.set_scale(1.0, 1.0).unwrap();
-    let dbg_creator = dbg_canvas.texture_creator();
-    let mut dbg_texture = dbg_creator
-        // .create_texture_target(PixelFormatEnum::RGB24, 256, 240)
-        .create_texture_target(PixelFormatEnum::RGB24, 256, 256)
-        .unwrap();
+        let image_texture = cc.egui_ctx.load_texture(
+            "nes-image",
+            egui::ColorImage::from_rgb([256, 240], vec![0; 256 * 240 * 3].as_slice()),
+            egui::TextureOptions {
+                magnification: egui::TextureFilter::Nearest,
+                minification: egui::TextureFilter::Nearest,
+                ..Default::default()
+            },
+        );
 
-    let mut paused = false;
-    // nes.audio_player.play().unwrap();
-    loop {
-        if !paused {
-            nes.clock_frame();
+        Self {
+            gui: Gui::new(),
+            nes,
+            image_texture,
+            audio_player: AudioPlayer::new(44100, dynwave::BufferSize::QuarterSecond).unwrap(),
+            key_map: get_key_map(),
 
-            // let samples = nes.bus_mut().drain_audio_buffer();
-            // nes.audio_player.queue(&samples);
-        }
-        let bus = nes.bus_mut();
-        let frame = bus.frame_buffer();
-
-        // let mut dbg_frame = vec![0x0; TOTAL_PIXELS * 2 * 3]; // 2 pattern tables, 3 channels RGB
-        // bus.ppu.load_pattern_tables(&mut dbg_frame);
-        // dbg_texture.update(None, &dbg_frame, 256 * 3).unwrap();
-        // let mut dbg_frame = vec![0x0; TOTAL_PIXELS * 4 * 3]; // 4 nametables, 3 channels RGB
-        // bus.ppu.load_name_tables(&mut dbg_frame);
-        // dbg_texture.update(None, &dbg_frame, 256 * 3).unwrap();
-        let mut dbg_frame = vec![0x0; (256 * 256) * 3]; // palette
-        bus.ppu.load_palette(&mut dbg_frame);
-        // dbg_texture.update(None, &dbg_frame, 256 * 3).unwrap();
-        // let mut dbg_frame = vec![0x00; 64 * 8 * 8 * 3]; // sprites
-        // bus.ppu.load_oam(&mut dbg_frame);
-
-        dbg_texture.update(None, &dbg_frame, 256 * 3).unwrap();
-        dbg_canvas.copy(&dbg_texture, None, None).unwrap();
-        dbg_canvas.present();
-
-        texture.update(None, frame, 256 * 3).unwrap();
-        canvas.copy(&texture, None, None).unwrap();
-        canvas.present();
-
-        // let joypad = &mut bus.joypad1;
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::ESCAPE),
-                    ..
-                } => std::process::exit(0),
-
-                Event::KeyDown { keycode, .. } => match keycode.unwrap() {
-                    Keycode::D => nes.save_state(),
-                    Keycode::F => nes.clock_frame(),
-                    Keycode::L => nes.load_state(),
-                    Keycode::P => paused = !paused,
-                    _ => {
-                        if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
-                            nes.bus_mut().joypad1.set_button(*key, true);
-                        }
-                    }
-                },
-                Event::KeyUp { keycode, .. } => {
-                    if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
-                        nes.bus_mut().joypad1.set_button(*key, false);
-                    }
-                }
-                _ => {}
-            }
+            show_tools: false,
+            current_tab: 0,
         }
     }
+
+    fn handle_input(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| {
+            for (key, button) in &self.key_map {
+                self.nes
+                    .bus_mut()
+                    .joypad1
+                    .set_button(*button, i.key_down(*key));
+            }
+        })
+    }
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_input(ctx);
+
+        self.nes.clock_frame();
+        let bus = self.nes.bus_mut();
+        let audio_buffer = bus.drain_audio_buffer();
+        let frame = bus.frame_buffer();
+
+        self.audio_player.queue(&audio_buffer);
+        // self.audio_player.play().unwrap();
+
+        self.gui.ui(ctx);
+
+        ctx.request_repaint();
+    }
+}
+
+#[allow(dead_code)]
+fn run_game_rom() {
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([256.0 * 3., 240.0 * 3.])
+            .with_min_inner_size([256.0, 240.0]),
+        ..Default::default()
+    };
+    let _ = eframe::run_native(
+        "nes",
+        native_options,
+        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+    );
 }
 
 #[allow(dead_code)]

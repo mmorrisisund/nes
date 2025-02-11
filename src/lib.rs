@@ -4,6 +4,7 @@ pub mod cartridge;
 pub mod common;
 pub mod controller;
 pub mod cpu;
+pub mod gui;
 pub mod nes;
 pub mod ppu;
 pub mod util;
