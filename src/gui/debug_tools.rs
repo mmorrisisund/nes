@@ -3,8 +3,10 @@ use std::sync::{
     Arc,
 };
 
-use eframe::egui::{CentralPanel, Context, ScrollArea, Ui, ViewportBuilder, ViewportId};
+use eframe::egui::{CentralPanel, Context, ScrollArea, Ui, Vec2, ViewportBuilder, ViewportId};
 use parking_lot::Mutex;
+
+use super::ppu_viewer::PpuViewer;
 
 #[derive(Debug)]
 pub struct DebugTools {
@@ -16,6 +18,7 @@ pub struct DebugTools {
 #[derive(Debug, Default)]
 pub struct State {
     tab: Tab,
+    ppu: PpuViewer,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -35,16 +38,17 @@ impl DebugTools {
 
         let open = self.open.clone();
         let state = self.state.clone();
-        ctx.show_viewport_deferred(
-            self.id,
-            ViewportBuilder::default().with_title(Self::TITLE),
-            move |ctx, _class| {
-                CentralPanel::default().show(ctx, |ui| state.lock().ui(ui));
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    open.store(false, Ordering::Relaxed);
-                }
-            },
-        );
+        let viewport = ViewportBuilder::default()
+            .with_title(Self::TITLE)
+            .with_inner_size(Vec2::new(1024.0, 768.0));
+
+        ctx.show_viewport_deferred(self.id, viewport, move |ctx, _class| {
+            CentralPanel::default().show(ctx, |ui| state.lock().ui(ui));
+
+            if ctx.input(|i| i.viewport().close_requested()) {
+                open.store(false, Ordering::Relaxed);
+            }
+        });
     }
 
     pub fn open(&self) -> bool {
@@ -86,6 +90,6 @@ impl State {
     }
 
     fn ppu_tab(&mut self, ui: &mut Ui) {
-        ui.label("PPU Tab");
+        self.ppu.show(ui);
     }
 }

@@ -1,4 +1,5 @@
 mod debug_tools;
+mod ppu_viewer;
 
 use debug_tools::DebugTools;
 use eframe::egui::{menu, Context, TopBottomPanel, Ui, ViewportCommand};

@@ -22,9 +22,9 @@ use registers::{
 use sprite::Sprite;
 use tile::Tile;
 
-pub const WIDTH: u32 = 256;
-pub const HEIGHT: u32 = 240;
-pub const TOTAL_PIXELS: usize = (WIDTH * HEIGHT) as usize;
+pub const WIDTH: usize = 256;
+pub const HEIGHT: usize = 240;
+pub const PIXEL_COUNT: usize = WIDTH * HEIGHT;
 const PALETTE_START: u16 = 0x3f00;
 const PALETTE_END: u16 = 0x3f20;
 
@@ -208,8 +208,8 @@ impl Ppu {
         for i in 0..4 {
             // x, y normall come from cycle, scanline
             let base_addr = address::NT_START + (i as u16) * NT_SIZE;
-            let x_offset = (i % 2) * WIDTH;
-            let y_offset = (i / 2) * HEIGHT;
+            let x_offset = (i % 2) * WIDTH as u32;
+            let y_offset = (i / 2) * HEIGHT as u32;
 
             for addr in base_addr..(base_addr + NT_SIZE - 64) {
                 let x_scroll = addr & address::COARSE_X_MASK;
@@ -246,7 +246,7 @@ impl Ppu {
                                 | ((self.mask.emphasis() as u16) << 1),
                             x + x_offset,
                             y + y_offset,
-                            WIDTH,
+                            WIDTH as u32,
                             pixels,
                         );
                     }
@@ -259,7 +259,7 @@ impl Ppu {
         for i in 0..2 {
             let start = (i as u16) * 0x1000;
             let end = start + 0x1000;
-            let x_offset = i * WIDTH / 2;
+            let x_offset = (i * WIDTH / 2) as u32;
 
             for tile_addr in (start..end).step_by(16) {
                 let tile_x = ((tile_addr % 0x1000) % 256) / 2;
@@ -272,7 +272,7 @@ impl Ppu {
                         let color = self.bus.peek(PALETTE_START | palette);
                         let x = u32::from(tile_x + (7 - x));
                         let y = u32::from(tile_y + y);
-                        Self::set_pixel(color as u16, x_offset + x, y, WIDTH, pixels);
+                        Self::set_pixel(color as u16, x_offset + x, y, WIDTH as u32, pixels);
                     }
                 }
             }
@@ -292,7 +292,7 @@ impl Ppu {
 
             for x in x..x + 32 {
                 for y in y..y + 32 {
-                    Self::set_pixel(color as u16, x, y, WIDTH, pixels);
+                    Self::set_pixel(color as u16, x, y, WIDTH as u32, pixels);
                 }
             }
         }

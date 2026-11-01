@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::TOTAL_PIXELS;
+use super::PIXEL_COUNT;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Frame {
@@ -10,7 +10,7 @@ pub struct Frame {
 impl Frame {
     pub fn new() -> Self {
         Self {
-            buffer: vec![0; TOTAL_PIXELS * 3],
+            buffer: vec![0; PIXEL_COUNT * 3],
         }
     }
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u8) {
